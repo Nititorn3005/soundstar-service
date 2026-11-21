@@ -114,177 +114,391 @@ function JobView({ job }: { job: RepairJob }) {
   }
 
   return (
-    <div className="mx-auto max-w-4xl print:m-0 print:box-border print:w-full print:p-0">
+    <div className="mx-auto max-w-4xl print:m-0 print:max-w-none print:w-full print:p-0">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap');
 
         @media print {
           @page {
             size: A4 portrait;
-            margin: 4mm 6mm !important;
+            margin: 8mm 10mm !important;
           }
           html, body {
-            height: 100% !important;
-            overflow: hidden !important;
-          }
-          html, body, * {
-            font-family: 'Sarabun', 'TH Sarabun New', sans-serif !important;
+            height: auto !important;
+            overflow: visible !important;
             background: white !important;
             color: black !important;
+            font-family: 'Sarabun', 'TH Sarabun New', sans-serif !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           aside, nav, header, button, select, iframe, [class*="netlify"], .no-print {
             display: none !important;
           }
-          .grid {
-            gap: 8px !important;
-          }
-          [class*="rounded-"], .border {
-            padding: 6px 10px !important;
-            margin-bottom: 4px !important;
-            border-color: #000 !important;
-          }
-          .print-header-title {
-            font-size: 18px !important;
-            font-weight: 700 !important;
-            line-height: 1.1 !important;
-          }
-          .print-header-sub {
-            font-size: 12px !important;
-            line-height: 1.2 !important;
-          }
-          .print-job-no {
-            font-size: 18px !important;
-            font-weight: 700 !important;
-          }
-          h1.customer-name { 
-            font-size: 22px !important; 
-            line-height: 1.15 !important; 
-            margin: 2px 0 !important; 
-            font-weight: 700 !important;
-          }
-          h2, h3 { 
-            font-size: 15px !important; 
-            font-weight: 700 !important; 
-            margin-bottom: 4px !important; 
-            border-bottom: 1px solid #000 !important;
-            padding-bottom: 1px !important;
-          }
-          p, span, li { 
-            font-size: 13px !important; 
-            line-height: 1.3 !important; 
-          }
-          dt {
-            font-size: 11px !important;
-            color: #333 !important;
-            font-weight: 600 !important;
-          }
-          dd {
-            font-size: 13.5px !important;
-            font-weight: 700 !important;
-          }
-          .print-sig {
-            font-size: 12px !important;
-            font-weight: 600 !important;
+          main, [class*="sidebar"] {
+            padding: 0 !important;
+            margin: 0 !important;
+            background: white !important;
           }
         }
       `}</style>
 
-      {/* Header สำหรับพิมพ์ออกกระดาษ A4 */}
-      <div className="hidden border-b border-black pb-1.5 print:block">
-        <div className="flex justify-between items-start">
-          <div>
-            <p className="print-header-title font-bold">{company.nameTh}</p>
-            <p className="print-header-sub">{company.nameEn} · {company.address} · โทร {company.phones}</p>
-          </div>
-          <div className="text-right">
-            <p className="print-header-title font-bold">
-              {printMode === 'FIELD' ? 'ใบปฏิบัติงานซ่อมหน้างาน' : 'ใบส่งคืนสินค้าและรับประกันซ่อม'}
-            </p>
-            <p className="print-header-sub">{printMode === 'FIELD' ? 'Field Service Sheet' : 'Completion Receipt'}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="no-print mb-4">
-        <Link to="/jobs" className="inline-flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="size-4" /> รายการงานซ่อม
-        </Link>
-      </div>
-
-      <div className="ticket-edge relative mb-4 overflow-hidden rounded-2xl bg-sidebar p-4 text-sidebar-accent-foreground sm:p-5 print:mb-1 print:bg-transparent print:p-0 print:text-foreground">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="print-job-no font-ticket text-xl font-bold tracking-wide text-sidebar-primary print:text-foreground">{job.jobNo}</p>
-            <h1 className="customer-name mt-0.5 font-display text-3xl font-bold tracking-tight">{job.customerName}</h1>
-            <p className="text-xs text-sidebar-foreground/80 print:text-xs print:text-foreground">
-              รับแจ้ง {fmtDateTime(job.receivedAt)} · โดย {profileName(job.receivedBy)}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={job.status} className="px-3 py-1 text-sm print:text-xs print:font-bold" />
-            <span className={cn('rounded-full px-3 py-1 text-sm print:text-xs print:font-bold', job.urgency === 'URGENT' || job.urgency === 'HIGH' ? 'bg-destructive text-white' : 'bg-sidebar-accent')}>
-              {URGENCY_LABEL[job.urgency]}
-            </span>
-          </div>
-        </div>
-
-        {/* ปุ่มสั่งพิมพ์ 2 แบบ */}
-        <div className="no-print mt-4 flex flex-wrap gap-2">
-          {next.length > 0 && (canWork || role === 'FRONT') ? (
-            <Button onClick={() => setStatusOpen(true)} className="bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90">
-              <ArrowRightLeft /> เปลี่ยนสถานะ
-            </Button>
-          ) : null}
-          {canWork && !closed && (
-            <Button variant="secondary" onClick={() => setPartOpen(true)}>
-              <PackageMinus /> เบิกอะไหล่
-            </Button>
-          )}
-          <Button variant="secondary" onClick={() => handlePrint('FIELD')}>
-            <Wrench className="size-4 mr-1" /> พิมพ์ใบช่างออกหน้างาน
-          </Button>
-          <Button variant="secondary" onClick={() => handlePrint('COMPLETE')}>
-            <FileCheck2 className="size-4 mr-1" /> พิมพ์ใบซ่อมเสร็จ/ส่งคืน
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr] print:grid-cols-1 print:gap-1.5">
-        <div className="grid gap-4 print:gap-1.5">
-          {/* ข้อมูลลูกค้าและเครื่อง */}
-          <Panel
-            title="ข้อมูลลูกค้าและเครื่อง"
-            action={
-              canEditCustomer && !closed ? (
-                <Button variant="ghost" size="sm" onClick={() => setEditCustomerOpen(true)} className="no-print h-8 text-xs">
-                  <Pencil className="mr-1 size-3.5" /> แก้ไขข้อมูล
-                </Button>
-              ) : undefined
-            }
-          >
-            <dl className="grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
-              <Item label="เบอร์โทรศัพท์" value={<a href={`tel:${job.phone}`} className="font-ticket text-primary hover:underline print:text-sm print:font-bold">{job.phone}</a>} />
-              <Item label="ผู้ติดต่อ" value={job.contactName} printHideIfEmpty />
-              <Item label="ที่อยู่ / สถานที่ติดตั้ง" value={job.address} wide />
-              <Item label="ประเภทเครื่อง" value={job.machineType} />
-              <Item label="ยี่ห้อ / รุ่น" value={`${job.brand} ${job.model}`} />
-              <Item label="หมายเลขเครื่อง" value={job.serialNo ? <span className="font-ticket">{job.serialNo}</span> : undefined} printHideIfEmpty />
-              <Item label="วันที่นัดหมาย" value={job.appointmentAt ? <span className={cn(isOverdue(job) && 'font-semibold text-destructive')}>{fmtDateTime(job.appointmentAt)}{isOverdue(job) && ' (เกินนัด)'}</span> : undefined} printHideIfEmpty />
-              <Item label="อาการเสีย" value={job.symptom} wide />
-              <Item label="รายละเอียดเพิ่มเติม" value={job.details} wide printHideIfEmpty />
-              <Item label="หมายเหตุ" value={job.note} wide printHideIfEmpty />
-            </dl>
-            {job.photos > 0 && (
-              <p className="no-print mt-3 flex items-center gap-2 rounded-lg bg-secondary/60 px-3 py-1.5 text-xs text-muted-foreground">
-                <Camera className="size-4" /> รูปภาพประกอบ {job.photos} รูป
+      {/* ==================== ฟอร์มพิมพ์: ใบช่างออกหน้างาน (FIELD) ==================== */}
+      {printMode === 'FIELD' && (
+        <div className="hidden print:block text-black" style={{ fontFamily: "'Sarabun', sans-serif" }}>
+          {/* หัวเอกสาร */}
+          <div className="flex items-start justify-between border-b-2 border-black pb-2">
+            <div>
+              <h1 className="text-[19px] font-bold leading-tight">{company.nameTh}</h1>
+              <p className="text-[11px] font-semibold text-gray-700">{company.nameEn}</p>
+              <p className="text-[11px] leading-snug">{company.address}</p>
+              <p className="text-[11px] font-semibold">โทร. {company.phones}</p>
+            </div>
+            <div className="text-right">
+              <div className="inline-block border-2 border-black px-3 py-1 text-center">
+                <p className="text-[16px] font-bold leading-tight">ใบปฏิบัติงานซ่อมหน้างาน</p>
+                <p className="text-[10px] tracking-wider uppercase">FIELD SERVICE JOB SHEET</p>
+              </div>
+              <p className="mt-1.5 text-[15px] font-bold">
+                เลขที่ใบงาน: <span className="underline">{job.jobNo}</span>
               </p>
+              <p className="text-[11px]">
+                ความเร่งด่วน: <span className="font-bold">{URGENCY_LABEL[job.urgency]}</span>
+              </p>
+            </div>
+          </div>
+
+          {/* แถบข้อมูลการรับแจ้ง & ช่าง */}
+          <div className="mt-2 grid grid-cols-3 border border-black bg-gray-100 px-2.5 py-1.5 text-[12px]">
+            <div>
+              <span className="font-semibold">วันที่รับแจ้ง:</span> {fmtDateTime(job.receivedAt)}
+            </div>
+            <div>
+              <span className="font-semibold">วันที่นัดหมาย:</span>{' '}
+              <span className="font-bold">{job.appointmentAt ? fmtDateTime(job.appointmentAt) : 'ตามสะดวก / นัดเพิ่ม'}</span>
+            </div>
+            <div>
+              <span className="font-semibold">ช่างผู้รับผิดชอบ:</span>{' '}
+              <span className="font-bold">{job.technicianId ? profileName(job.technicianId) : '..............................'}</span>
+            </div>
+          </div>
+
+          {/* ข้อมูลลูกค้า และ ข้อมูลเครื่อง (2 คอลัมน์) */}
+          <div className="mt-2 grid grid-cols-2 gap-2.5">
+            {/* กล่องข้อมูลลูกค้า */}
+            <div className="border border-black p-2.5">
+              <h2 className="border-b border-black pb-1 text-[13px] font-bold">1. ข้อมูลลูกค้าและสถานที่ปฏิบัติงาน</h2>
+              <div className="mt-1.5 space-y-1 text-[12px] leading-snug">
+                <p>
+                  <span className="font-semibold">ชื่อลูกค้า:</span>{' '}
+                  <span className="text-[14px] font-bold">{job.customerName}</span>
+                </p>
+                <p>
+                  <span className="font-semibold">เบอร์โทรศัพท์:</span>{' '}
+                  <span className="text-[14px] font-bold">{job.phone}</span>
+                  {job.contactName ? <span className="ml-2">(ติดต่อ: {job.contactName})</span> : null}
+                </p>
+                <p>
+                  <span className="font-semibold">ที่อยู่ / สถานที่ติดตั้ง:</span> {job.address}
+                </p>
+              </div>
+            </div>
+
+            {/* กล่องข้อมูลเครื่อง */}
+            <div className="border border-black p-2.5">
+              <h2 className="border-b border-black pb-1 text-[13px] font-bold">2. ข้อมูลเครื่องซ่อมและอาการเสีย</h2>
+              <div className="mt-1.5 space-y-1 text-[12px] leading-snug">
+                <p>
+                  <span className="font-semibold">ประเภทเครื่อง:</span> <span className="font-bold">{job.machineType}</span>
+                </p>
+                <p>
+                  <span className="font-semibold">ยี่ห้อ / รุ่น:</span>{' '}
+                  <span className="font-bold">{job.brand} {job.model}</span>
+                  {job.serialNo ? <span className="ml-2">· S/N: {job.serialNo}</span> : null}
+                </p>
+                <p>
+                  <span className="font-semibold">อาการเสียที่แจ้ง:</span>{' '}
+                  <span className="font-bold underline">{job.symptom}</span>
+                </p>
+                {(job.details || job.note) && (
+                  <p className="text-[11px]">
+                    <span className="font-semibold">เพิ่มเติม/หมายเหตุ:</span>{' '}
+                    {[job.details, job.note].filter(Boolean).join(' · ')}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ส่วนบันทึกของช่างหน้างาน */}
+          <div className="mt-2 border border-black p-2.5">
+            <div className="flex items-center justify-between border-b border-black pb-1">
+              <h2 className="text-[13px] font-bold">3. บันทึกการตรวจเช็กและการปฏิบัติงานของช่าง (สำหรับช่างกรอกหน้างาน)</h2>
+              <div className="text-[11px] font-semibold">
+                เวลาเข้า: _____:_____ น. &nbsp;|&nbsp; เวลาเสร็จ: _____:_____ น.
+              </div>
+            </div>
+
+            <div className="mt-2 space-y-2 text-[12px]">
+              <div>
+                <p className="font-semibold">สาเหตุ / อาการเสียที่ตรวจพบจริง:</p>
+                <div className="mt-1 border-b border-dotted border-black pt-4" />
+                <div className="mt-1 border-b border-dotted border-black pt-4" />
+              </div>
+
+              <div>
+                <p className="font-semibold">รายละเอียดการซ่อม / การแก้ไข:</p>
+                <div className="mt-1 border-b border-dotted border-black pt-4" />
+                <div className="mt-1 border-b border-dotted border-black pt-4" />
+              </div>
+            </div>
+
+            {/* ตารางอะไหล่และค่าใช้จ่าย */}
+            <div className="mt-2.5">
+              <p className="mb-1 text-[12px] font-bold">รายการอะไหล่ที่เปลี่ยน / ค่าบริการหน้างาน:</p>
+              <table className="w-full border-collapse border border-black text-[11px]">
+                <thead>
+                  <tr className="bg-gray-100">
+                    <th className="w-10 border border-black py-1 text-center">ลำดับ</th>
+                    <th className="border border-black px-2 py-1 text-left">รายการอะไหล่ / รายละเอียดค่าบริการ</th>
+                    <th className="w-16 border border-black py-1 text-center">จำนวน</th>
+                    <th className="w-24 border border-black py-1 text-right px-2">ราคา/หน่วย</th>
+                    <th className="w-24 border border-black py-1 text-right px-2">จำนวนเงิน</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[1, 2, 3, 4, 5].map((row) => (
+                    <tr key={row}>
+                      <td className="border border-black py-2 text-center">{row}</td>
+                      <td className="border border-black px-2 py-2"></td>
+                      <td className="border border-black py-2 text-center"></td>
+                      <td className="border border-black px-2 py-2 text-right"></td>
+                      <td className="border border-black px-2 py-2 text-right"></td>
+                    </tr>
+                  ))}
+                  <tr className="bg-gray-50 font-bold">
+                    <td colSpan={4} className="border border-black px-2 py-1 text-right">
+                      รวมค่าใช้จ่ายทั้งสิ้น (บาท)
+                    </td>
+                    <td className="border border-black px-2 py-1 text-right"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* สรุปผลการซ่อมหน้างาน */}
+            <div className="mt-2.5 border-t border-black pt-2 text-[11.5px]">
+              <p className="font-bold mb-1">สรุปผลการปฏิบัติงาน:</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                <div>☐ ซ่อมสำเร็จ / ทดสอบเครื่องใช้งานได้ปกติ</div>
+                <div>☐ รออะไหล่ / นัดเข้าดำเนินการซ่อมซ้ำ</div>
+                <div>☐ ยกเครื่องกลับซ่อมที่ศูนย์บริการ</div>
+                <div>☐ ลูกค้าไม่ประสงค์ซ่อม / ยกเลิกซ่อม</div>
+              </div>
+            </div>
+          </div>
+
+          {/* ช่องลายมือชื่อ 3 ช่อง */}
+          <div className="mt-3 grid grid-cols-3 gap-4 border border-black p-2.5 text-center text-[11.5px]">
+            <div>
+              <p className="font-semibold">ผู้รับบริการ / ลูกค้า</p>
+              <div className="mx-auto mt-7 w-4/5 border-b border-black" />
+              <p className="mt-1">( ...................................................... )</p>
+              <p className="mt-0.5 text-[10.5px]">วันที่ ........ / ........ / ............</p>
+            </div>
+            <div>
+              <p className="font-semibold">ช่างผู้เข้าปฏิบัติงาน</p>
+              <div className="mx-auto mt-7 w-4/5 border-b border-black" />
+              <p className="mt-1">
+                ( {job.technicianId ? profileName(job.technicianId) : '......................................................'} )
+              </p>
+              <p className="mt-0.5 text-[10.5px]">วันที่ ........ / ........ / ............</p>
+            </div>
+            <div>
+              <p className="font-semibold">ผู้รับแจ้งงาน / เจ้าหน้าที่</p>
+              <div className="mx-auto mt-7 w-4/5 border-b border-black" />
+              <p className="mt-1">( {profileName(job.receivedBy)} )</p>
+              <p className="mt-0.5 text-[10.5px]">วันที่ ........ / ........ / ............</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== ฟอร์มพิมพ์: ใบซ่อมเสร็จ/ส่งคืน (COMPLETE) ==================== */}
+      {printMode === 'COMPLETE' && (
+        <div className="hidden print:block text-black" style={{ fontFamily: "'Sarabun', sans-serif" }}>
+          <div className="flex items-start justify-between border-b-2 border-black pb-2">
+            <div>
+              <h1 className="text-[19px] font-bold leading-tight">{company.nameTh}</h1>
+              <p className="text-[11px] font-semibold text-gray-700">{company.nameEn}</p>
+              <p className="text-[11px] leading-snug">{company.address}</p>
+              <p className="text-[11px] font-semibold">โทร. {company.phones}</p>
+            </div>
+            <div className="text-right">
+              <div className="inline-block border-2 border-black px-3 py-1 text-center">
+                <p className="text-[16px] font-bold leading-tight">ใบส่งคืนสินค้าและรับประกันซ่อม</p>
+                <p className="text-[10px] tracking-wider uppercase">COMPLETION &amp; DELIVERY RECEIPT</p>
+              </div>
+              <p className="mt-1.5 text-[15px] font-bold">
+                เลขที่ใบงาน: <span className="underline">{job.jobNo}</span>
+              </p>
+              <p className="text-[11px]">สถานะ: <span className="font-bold">{STATUS_LABEL[job.status]}</span></p>
+            </div>
+          </div>
+
+          <div className="mt-2.5 border border-black p-3 text-[12px]">
+            <h2 className="border-b border-black pb-1 text-[13.5px] font-bold">ข้อมูลลูกค้าและเครื่องซ่อม</h2>
+            <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
+              <p><span className="font-semibold">ชื่อลูกค้า:</span> <span className="font-bold text-[14px]">{job.customerName}</span></p>
+              <p><span className="font-semibold">เบอร์โทรศัพท์:</span> <span className="font-bold">{job.phone}</span></p>
+              <p className="col-span-2"><span className="font-semibold">ที่อยู่:</span> {job.address}</p>
+              <p><span className="font-semibold">ประเภทเครื่อง:</span> {job.machineType}</p>
+              <p><span className="font-semibold">ยี่ห้อ / รุ่น:</span> {job.brand} {job.model} {job.serialNo ? `(S/N: ${job.serialNo})` : ''}</p>
+              <p className="col-span-2"><span className="font-semibold">อาการเสียที่แจ้ง:</span> {job.symptom}</p>
+            </div>
+          </div>
+
+          <div className="mt-2.5 border border-black p-3 text-[12px]">
+            <h2 className="border-b border-black pb-1 text-[13.5px] font-bold">รายละเอียดผลการตรวจเช็กและการซ่อม</h2>
+            <div className="mt-2 space-y-2">
+              <p><span className="font-semibold">ผลการตรวจสอบ:</span> {job.diagnosis || '—'}</p>
+              <p><span className="font-semibold">วิธีแก้ไข:</span> {job.resolution || '—'}</p>
+              <p><span className="font-semibold">ผลการซ่อม:</span> <span className="font-bold">{job.result || '—'}</span></p>
+            </div>
+
+            {job.parts.length > 0 && (
+              <div className="mt-3">
+                <p className="mb-1 font-bold">รายการอะไหล่ที่ใช้:</p>
+                <table className="w-full border-collapse border border-black text-[11.5px]">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="w-12 border border-black py-1 text-center">ลำดับ</th>
+                      <th className="w-28 border border-black px-2 py-1 text-left">รหัสอะไหล่</th>
+                      <th className="border border-black px-2 py-1 text-left">ชื่ออะไหล่</th>
+                      <th className="w-20 border border-black py-1 text-center">จำนวน</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {job.parts.map((p, idx) => {
+                      const item = inventory.find((x) => x.id === p.partId)
+                      return (
+                        <tr key={idx}>
+                          <td className="border border-black py-1 text-center">{idx + 1}</td>
+                          <td className="border border-black px-2 py-1">{item?.code || '-'}</td>
+                          <td className="border border-black px-2 py-1">{item?.name || '-'}</td>
+                          <td className="border border-black py-1 text-center">{p.qty} {item?.unit || ''}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
-          </Panel>
+          </div>
 
-          <RepairNotes job={job} editable={canWork && !closed} />
+          <div className="mt-4 grid grid-cols-3 gap-4 border border-black p-3 text-center text-[11.5px]">
+            <div>
+              <p className="font-semibold">ลูกค้าผู้ตรวจรับมอบสินค้าคืน</p>
+              <div className="mx-auto mt-8 w-4/5 border-b border-black" />
+              <p className="mt-1">( ...................................................... )</p>
+              <p className="mt-0.5 text-[10.5px]">วันที่ ........ / ........ / ............</p>
+            </div>
+            <div>
+              <p className="font-semibold">ช่างผู้ดำเนินการซ่อม</p>
+              <div className="mx-auto mt-8 w-4/5 border-b border-black" />
+              <p className="mt-1">
+                ( {job.technicianId ? profileName(job.technicianId) : '......................................................'} )
+              </p>
+              <p className="mt-0.5 text-[10.5px]">วันที่ ........ / ........ / ............</p>
+            </div>
+            <div>
+              <p className="font-semibold">ผู้ส่งมอบสินค้า / ผู้ตรวจสอบ</p>
+              <div className="mx-auto mt-8 w-4/5 border-b border-black" />
+              <p className="mt-1">( {profileName(currentUser?.id || job.receivedBy)} )</p>
+              <p className="mt-0.5 text-[10.5px]">วันที่ ........ / ........ / ............</p>
+            </div>
+          </div>
+        </div>
+      )}
 
-          {/* อะไหล่ที่ใช้ (ซ่อนตอนพิมพ์) */}
-          <div className="print:hidden">
+      {/* ==================== หน้าจอปกติบนเว็บ (ซ่อนตอนพิมพ์) ==================== */}
+      <div className="print:hidden">
+        <div className="no-print mb-4">
+          <Link to="/jobs" className="inline-flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="size-4" /> รายการงานซ่อม
+          </Link>
+        </div>
+
+        <div className="ticket-edge relative mb-4 overflow-hidden rounded-2xl bg-sidebar p-4 text-sidebar-accent-foreground sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="font-ticket text-xl font-bold tracking-wide text-sidebar-primary">{job.jobNo}</p>
+              <h1 className="mt-0.5 font-display text-3xl font-bold tracking-tight">{job.customerName}</h1>
+              <p className="text-xs text-sidebar-foreground/80">
+                รับแจ้ง {fmtDateTime(job.receivedAt)} · โดย {profileName(job.receivedBy)}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge status={job.status} className="px-3 py-1 text-sm" />
+              <span className={cn('rounded-full px-3 py-1 text-sm', job.urgency === 'URGENT' || job.urgency === 'HIGH' ? 'bg-destructive text-white' : 'bg-sidebar-accent')}>
+                {URGENCY_LABEL[job.urgency]}
+              </span>
+            </div>
+          </div>
+
+          <div className="no-print mt-4 flex flex-wrap gap-2">
+            {next.length > 0 && (canWork || role === 'FRONT') ? (
+              <Button onClick={() => setStatusOpen(true)} className="bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90">
+                <ArrowRightLeft /> เปลี่ยนสถานะ
+              </Button>
+            ) : null}
+            {canWork && !closed && (
+              <Button variant="secondary" onClick={() => setPartOpen(true)}>
+                <PackageMinus /> เบิกอะไหล่
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => handlePrint('FIELD')}>
+              <Wrench className="size-4 mr-1" /> พิมพ์ใบช่างออกหน้างาน
+            </Button>
+            <Button variant="secondary" onClick={() => handlePrint('COMPLETE')}>
+              <FileCheck2 className="size-4 mr-1" /> พิมพ์ใบซ่อมเสร็จ/ส่งคืน
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+          <div className="grid gap-4">
+            <Panel
+              title="ข้อมูลลูกค้าและเครื่อง"
+              action={
+                canEditCustomer && !closed ? (
+                  <Button variant="ghost" size="sm" onClick={() => setEditCustomerOpen(true)} className="no-print h-8 text-xs">
+                    <Pencil className="mr-1 size-3.5" /> แก้ไขข้อมูล
+                  </Button>
+                ) : undefined
+              }
+            >
+              <dl className="grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
+                <Item label="เบอร์โทรศัพท์" value={<a href={`tel:${job.phone}`} className="font-ticket text-primary hover:underline">{job.phone}</a>} />
+                <Item label="ผู้ติดต่อ" value={job.contactName} />
+                <Item label="ที่อยู่ / สถานที่ติดตั้ง" value={job.address} wide />
+                <Item label="ประเภทเครื่อง" value={job.machineType} />
+                <Item label="ยี่ห้อ / รุ่น" value={`${job.brand} ${job.model}`} />
+                <Item label="หมายเลขเครื่อง" value={job.serialNo ? <span className="font-ticket">{job.serialNo}</span> : undefined} />
+                <Item label="วันที่นัดหมาย" value={job.appointmentAt ? <span className={cn(isOverdue(job) && 'font-semibold text-destructive')}>{fmtDateTime(job.appointmentAt)}{isOverdue(job) && ' (เกินนัด)'}</span> : undefined} />
+                <Item label="อาการเสีย" value={job.symptom} wide />
+                <Item label="รายละเอียดเพิ่มเติม" value={job.details} wide />
+                <Item label="หมายเหตุ" value={job.note} wide />
+              </dl>
+              {job.photos > 0 && (
+                <p className="no-print mt-3 flex items-center gap-2 rounded-lg bg-secondary/60 px-3 py-1.5 text-xs text-muted-foreground">
+                  <Camera className="size-4" /> รูปภาพประกอบ {job.photos} รูป
+                </p>
+              )}
+            </Panel>
+
+            <RepairNotes job={job} editable={canWork && !closed} />
+
             <Panel title="อะไหล่ที่ใช้">
               {job.parts.length === 0 ? (
                 <p className="text-xs text-muted-foreground">ยังไม่มีการเบิกอะไหล่สำหรับงานนี้</p>
@@ -306,72 +520,39 @@ function JobView({ job }: { job: RepairJob }) {
               )}
             </Panel>
           </div>
-        </div>
 
-        <div className="grid h-fit gap-4 print:hidden">
-          <AssignPanel job={job} />
+          <div className="grid h-fit gap-4">
+            <AssignPanel job={job} />
 
-          <Panel title="ประวัติการทำงาน">
-            <ol className="relative ml-2 border-l-2 border-border pt-1">
-              {historyList.map((h, i) => (
-                <li key={h.id || i} className="relative pb-4 pl-4 last:pb-1">
-                  <span
-                    className={cn(
-                      'absolute -left-[7px] top-1 size-3 rounded-full ring-4 ring-card',
-                      i === 0 ? 'bg-highlight' : 'bg-border',
-                    )}
-                  />
-                  <p className="text-xs font-semibold">
-                    {h.from ? <>{STATUS_LABEL[h.from as JobStatus]} → </> : null}
-                    {STATUS_LABEL[h.to as JobStatus] || h.to}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">
-                    {fmtDateTime(h.at)} {h.by ? `· ${profileName(h.by)}` : ''}
-                  </p>
-                  {h.note && (
-                    <p className="mt-1 rounded-md bg-muted px-2 py-1 text-[11px] text-foreground/80">
-                      {h.note}
+            <Panel title="ประวัติการทำงาน">
+              <ol className="relative ml-2 border-l-2 border-border pt-1">
+                {historyList.map((h, i) => (
+                  <li key={h.id || i} className="relative pb-4 pl-4 last:pb-1">
+                    <span
+                      className={cn(
+                        'absolute -left-[7px] top-1 size-3 rounded-full ring-4 ring-card',
+                        i === 0 ? 'bg-highlight' : 'bg-border',
+                      )}
+                    />
+                    <p className="text-xs font-semibold">
+                      {h.from ? <>{STATUS_LABEL[h.from as JobStatus]} → </> : null}
+                      {STATUS_LABEL[h.to as JobStatus] || h.to}
                     </p>
-                  )}
-                </li>
-              ))}
-            </ol>
-          </Panel>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {fmtDateTime(h.at)} {h.by ? `· ${profileName(h.by)}` : ''}
+                    </p>
+                    {h.note && (
+                      <p className="mt-1 rounded-md bg-muted px-2 py-1 text-[11px] text-foreground/80">
+                        {h.note}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </Panel>
+          </div>
         </div>
       </div>
-
-      {/* สลับลายเซ็นต์ท้ายกระดาษตามประเภทใบงาน */}
-      {printMode === 'FIELD' ? (
-        <div className="mt-6 hidden grid-cols-3 gap-6 text-center text-xs print:grid print:text-xs">
-          <div className="print-sig">
-            <div className="mb-1 border-b border-black pt-8" />
-            ( ลูกค้า / ผู้ยินยอมให้เข้าตรวจซ่อม )
-          </div>
-          <div className="print-sig">
-            <div className="mb-1 border-b border-black pt-8" />
-            ( ช่างผู้เข้าปฏิบัติงาน )
-          </div>
-          <div className="print-sig">
-            <div className="mb-1 border-b border-black pt-8" />
-            ( ผู้รับแจ้งงาน / เจ้าหน้าที่ )
-          </div>
-        </div>
-      ) : (
-        <div className="mt-6 hidden grid-cols-3 gap-6 text-center text-xs print:grid print:text-xs">
-          <div className="print-sig">
-            <div className="mb-1 border-b border-black pt-8" />
-            ( ลูกค้าผู้ตรวจรับมอบสินค้าคืน )
-          </div>
-          <div className="print-sig">
-            <div className="mb-1 border-b border-black pt-8" />
-            ( ช่างผู้ดำเนินการซ่อม )
-          </div>
-          <div className="print-sig">
-            <div className="mb-1 border-b border-black pt-8" />
-            ( ผู้ส่งมอบสินค้า / ผู้ตรวจสอบ )
-          </div>
-        </div>
-      )}
 
       <EditCustomerDialog job={job} open={editCustomerOpen} onOpenChange={setEditCustomerOpen} />
       <StatusDialog job={job} options={next} open={statusOpen} onOpenChange={setStatusOpen} />
@@ -380,10 +561,9 @@ function JobView({ job }: { job: RepairJob }) {
   )
 }
 
-function Item({ label, value, wide, printHideIfEmpty }: { label: string; value?: React.ReactNode; wide?: boolean; printHideIfEmpty?: boolean }) {
-  const isEmpty = !value
+function Item({ label, value, wide }: { label: string; value?: React.ReactNode; wide?: boolean }) {
   return (
-    <div className={cn(wide && 'sm:col-span-2', isEmpty && printHideIfEmpty && 'print:hidden')}>
+    <div className={cn(wide && 'sm:col-span-2')}>
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 font-medium">{value || '—'}</dd>
     </div>
@@ -422,7 +602,7 @@ function RepairNotes({ job, editable }: { job: RepairJob; editable: boolean }) {
               <select
                 id="result"
                 name="result"
-                className="native-select print:hidden"
+                className="native-select"
                 defaultValue={job.result ?? ''}
               >
                 <option value="">— เลือกผลการซ่อม —</option>
@@ -435,7 +615,6 @@ function RepairNotes({ job, editable }: { job: RepairJob; editable: boolean }) {
                   </option>
                 ))}
               </select>
-              <p className="hidden font-medium print:block">{job.result || '—'}</p>
             </Field>
             <Button type="submit" variant="outline" className="no-print w-fit">
               <Save /> บันทึกผล
@@ -443,9 +622,9 @@ function RepairNotes({ job, editable }: { job: RepairJob; editable: boolean }) {
           </>
         ) : (
           <>
-            <Item label="ผลการตรวจสอบ" value={job.diagnosis} printHideIfEmpty />
-            <Item label="วิธีแก้ไข" value={job.resolution} printHideIfEmpty />
-            <Item label="ผลการซ่อม" value={job.result} printHideIfEmpty />
+            <Item label="ผลการตรวจสอบ" value={job.diagnosis} />
+            <Item label="วิธีแก้ไข" value={job.resolution} />
+            <Item label="ผลการซ่อม" value={job.result} />
           </>
         )}
       </form>
