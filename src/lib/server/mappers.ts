@@ -134,16 +134,38 @@ function splitBrandModel(r: Row) {
 }
 
 export function toJob(r: Row, parts: JobPart[]): RepairJob {
-  const history: JobHistory[] = ((r.repair_job_history ?? []) as Row[])
-    .map((h) => ({
-      id: h.id,
-      at: h.created_at,
-      by: h.created_by,
-      from: h.from_status ? toStatus(h.from_status) : null,
-      to: toStatus(h.to_status),
-      note: str(h.note) || undefined,
-    }))
+  // 1. ประวัติจากตาราง repair_job_history
+  const tableHistory: JobHistory[] = ((r.repair_job_history ?? []) as Row[]).map((h) => ({
+    id: String(h.id ?? crypto.randomUUID()),
+    at: String(h.created_at ?? r.created_at),
+    by: String(h.created_by ?? r.created_by ?? ''),
+    from: h.from_status ? toStatus(h.from_status) : null,
+    to: toStatus(h.to_status),
+    note: str(h.note) || undefined,
+  }))
+
+  // 2. ประวัติจากคอลัมน์ JSONB history ในตาราง repair_jobs
+  const jsonHistory: JobHistory[] = (Array.isArray(r.history) ? (r.history as Row[]) : []).map((h) => ({
+    id: String(h.id ?? crypto.randomUUID()),
+    at: String(h.at ?? h.created_at ?? r.created_at),
+    by: String(h.by ?? h.created_by ?? r.created_by ?? ''),
+    from: h.from ? toStatus(h.from) : h.from_status ? toStatus(h.from_status) : null,
+    to: toStatus(h.to ?? h.to_status ?? r.status),
+    note: str(h.note) || undefined,
+  }))
+
+  // รวมประวัติทั้งหมดเข้าด้วยกันและตัดรายการซ้ำ (อิงจาก id หรือเวลา+สถานะ)
+  const merged = [...tableHistory, ...jsonHistory]
+  const seen = new Set<string>()
+  const history: JobHistory[] = merged
+    .filter((item) => {
+      const key = item.id || `${item.at}-${item.to}-${item.note ?? ''}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
     .sort((a, b) => a.at.localeCompare(b.at))
+
   return {
     id: r.id,
     jobNo: r.job_no,
