@@ -1,1 +1,0 @@
-import{l as e,s as t}from"./shell-C6c3jU2Z.js";import{t as n}from"./stock-form-6Q_ZHnif.js";import{T as r}from"./store-Dylfu55k.js";var i=r(),a=()=>(0,i.jsxs)(e,{roles:[`ADMIN`,`TECH`],children:[(0,i.jsx)(t,{eyebrow:`Stock out`,title:`เบิกอะไหล่ออก`,description:`เบิกอะไหล่และผูกกับใบงานซ่อม ระบบไม่อนุญาตให้เบิกเกินยอดคงเหลือ`}),(0,i.jsx)(n,{mode:`OUT`})]});export{a as component};
