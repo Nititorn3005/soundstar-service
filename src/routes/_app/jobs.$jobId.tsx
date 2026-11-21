@@ -8,7 +8,6 @@ import {
   FileSearch,
   PackageMinus,
   Pencil,
-  Printer,
   Save,
   Wrench,
 } from 'lucide-react'
@@ -37,6 +36,17 @@ import {
 } from '@/lib/domain'
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
+
+const REPAIR_RESULT_OPTIONS = [
+  'ซ่อมสำเร็จ / ใช้งานได้ปกติ',
+  'เปลี่ยนอะไหล่แล้ว / ทดสอบผ่าน',
+  'ปรับจูนและทำความสะอาด / ใช้งานได้ปกติ',
+  'รออะไหล่ / นัดเข้าซ่อมซ้ำ',
+  'ส่งซ่อมศูนย์ / ส่งซ่อมต่อ',
+  'ลูกค้าไม่ประสงค์ซ่อม / ยกเลิกซ่อม',
+  'ซ่อมไม่ได้ / ไม่คุ้มค่าซ่อม',
+  'อื่นๆ',
+]
 
 export const Route = createFileRoute('/_app/jobs/$jobId')({
   head: () => ({ meta: [{ title: 'รายละเอียดงานซ่อม · Hatyai Soundstar' }] }),
@@ -73,7 +83,7 @@ function JobView({ job }: { job: RepairJob }) {
   const [statusOpen, setStatusOpen] = React.useState(false)
   const [partOpen, setPartOpen] = React.useState(false)
   const [editCustomerOpen, setEditCustomerOpen] = React.useState(false)
-  
+
   // สถานะเลือกรูปแบบการพิมพ์: 'FIELD' = ใบช่างออกหน้างาน, 'COMPLETE' = ใบซ่อมเสร็จ/ส่งคืน
   const [printMode, setPrintMode] = React.useState<'FIELD' | 'COMPLETE'>('FIELD')
 
@@ -241,10 +251,9 @@ function JobView({ job }: { job: RepairJob }) {
 
       <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr] print:grid-cols-1 print:gap-1.5">
         <div className="grid gap-4 print:gap-1.5">
-          
           {/* ข้อมูลลูกค้าและเครื่อง */}
-          <Panel 
-            title="ข้อมูลลูกค้าและเครื่อง" 
+          <Panel
+            title="ข้อมูลลูกค้าและเครื่อง"
             action={
               canEditCustomer && !closed ? (
                 <Button variant="ghost" size="sm" onClick={() => setEditCustomerOpen(true)} className="no-print h-8 text-xs">
@@ -301,7 +310,7 @@ function JobView({ job }: { job: RepairJob }) {
 
         <div className="grid h-fit gap-4 print:hidden">
           <AssignPanel job={job} />
-          
+
           <Panel title="ประวัติการทำงาน">
             <ol className="relative ml-2 border-l-2 border-border pt-1">
               {historyList.map((h, i) => (
@@ -383,6 +392,8 @@ function Item({ label, value, wide, printHideIfEmpty }: { label: string; value?:
 
 function RepairNotes({ job, editable }: { job: RepairJob; editable: boolean }) {
   const { updateJob } = useAppStore()
+  const hasCustomResult = Boolean(job.result && !REPAIR_RESULT_OPTIONS.includes(job.result))
+
   return (
     <Panel title="ผลการตรวจสอบและการซ่อม">
       <form
@@ -399,23 +410,42 @@ function RepairNotes({ job, editable }: { job: RepairJob; editable: boolean }) {
           else toast.error(res.error)
         }}
       >
-        {([
-          ['diagnosis', 'ผลการตรวจสอบ', job.diagnosis],
-          ['resolution', 'วิธีแก้ไข', job.resolution],
-          ['result', 'ผลการซ่อม', job.result],
-        ] as const).map(([name, label, value]) =>
-          editable ? (
-            <Field key={name} label={label} htmlFor={name}>
-              <Textarea id={name} name={name} defaultValue={value} rows={2} />
+        {editable ? (
+          <>
+            <Field label="ผลการตรวจสอบ" htmlFor="diagnosis">
+              <Textarea id="diagnosis" name="diagnosis" defaultValue={job.diagnosis} rows={2} />
             </Field>
-          ) : (
-            <Item key={name} label={label} value={value} printHideIfEmpty />
-          ),
-        )}
-        {editable && (
-          <Button type="submit" variant="outline" className="no-print w-fit">
-            <Save /> บันทึกผล
-          </Button>
+            <Field label="วิธีแก้ไข" htmlFor="resolution">
+              <Textarea id="resolution" name="resolution" defaultValue={job.resolution} rows={2} />
+            </Field>
+            <Field label="ผลการซ่อม" htmlFor="result">
+              <select
+                id="result"
+                name="result"
+                className="native-select"
+                defaultValue={job.result ?? ''}
+              >
+                <option value="">— เลือกผลการซ่อม —</option>
+                {hasCustomResult && (
+                  <option value={job.result}>{job.result}</option>
+                )}
+                {REPAIR_RESULT_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Button type="submit" variant="outline" className="no-print w-fit">
+              <Save /> บันทึกผล
+            </Button>
+          </>
+        ) : (
+          <>
+            <Item label="ผลการตรวจสอบ" value={job.diagnosis} printHideIfEmpty />
+            <Item label="วิธีแก้ไข" value={job.resolution} printHideIfEmpty />
+            <Item label="ผลการซ่อม" value={job.result} printHideIfEmpty />
+          </>
         )}
       </form>
     </Panel>
