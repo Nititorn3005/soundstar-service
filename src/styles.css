@@ -17,8 +17,8 @@ code {
 }
 
 :root {
-  --font-body: 'IBM Plex Sans Thai', system-ui, sans-serif;
-  --font-heading: 'Anuphan', 'IBM Plex Sans Thai', system-ui, sans-serif;
+  --font-body: 'Sarabun', 'IBM Plex Sans Thai', system-ui, sans-serif;
+  --font-heading: 'Sarabun', 'IBM Plex Sans Thai', system-ui, sans-serif;
   --font-mono-ticket: 'JetBrains Mono', ui-monospace, monospace;
   --content-width: 80rem;
   --reading-width: 42rem;
