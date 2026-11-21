@@ -51,3 +51,5 @@ netlify dev
 
 ดูรายละเอียดใน [PLAN.md](PLAN.md): ฐานข้อมูล Supabase → Login ด้วยชื่อผู้ใช้ + Setup Token →
 จัดการผู้ใช้จริง → งานซ่อม/สต๊อกบน RPC แบบ transaction → Storage รูปภาพ → รายงาน → ทดสอบและคู่มือ
+
+
