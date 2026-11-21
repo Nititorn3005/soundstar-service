@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   allowedNextStatuses,
+  generateJobNo,
   type InventoryItem,
   type InventoryTx,
   type Profile,
@@ -124,20 +125,31 @@ export const getAppData = createServerFn({ method: "GET" }).handler(
   },
 );
 
+const jobItemSchema = z.object({
+  applianceType: z.string().trim().min(1).max(120),
+  brand: z.string().trim().min(1).max(120),
+  model: z.string().trim().min(1).max(120),
+  serialNumber: z.string().max(120).optional(),
+  purchaseDate: z.string().optional(),
+  symptom: z.string().trim().min(1).max(2000),
+  details: z.string().max(5000).optional(),
+});
+
 const jobInput = z.object({
   customerName: z.string().trim().min(1).max(200),
   phone: z.string().trim().min(1).max(40),
   contactName: z.string().max(200).optional(),
   address: z.string().trim().min(1).max(1000),
-  machineType: z.string().trim().min(1).max(120),
-  brand: z.string().trim().min(1).max(120),
-  model: z.string().trim().min(1).max(120),
+  items: z.array(jobItemSchema).min(1).optional(),
+  machineType: z.string().max(120).optional(),
+  brand: z.string().max(120).optional(),
+  model: z.string().max(120).optional(),
   serialNo: z.string().max(120).optional(),
-  symptom: z.string().trim().min(1).max(2000),
+  symptom: z.string().max(2000).optional(),
   details: z.string().max(5000).optional(),
   technicianId: z.string().uuid().optional(),
-  appointmentAt: z.string().datetime().optional(),
-  urgency: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]),
+  appointmentAt: z.string().optional(),
+  urgency: z.string().default("LOW"),
   note: z.string().max(5000).optional(),
   photos: z.number().int().min(0).max(6).optional(),
 });
@@ -146,34 +158,89 @@ export const createRepairJob = createServerFn({ method: "POST" })
   .validator(jobInput)
   .handler(async ({ data }): Promise<Result<RepairJob>> => {
     try {
-      const viewer = await viewerWithRole(["ADMIN", "FRONT"]);
+      const viewer = await viewerWithRole(["ADMIN", "FRONT", "RECEPTION"]);
       const { profile } = viewer;
       if (profile.role !== "ADMIN" && data.technicianId)
         return fail("เฉพาะผู้ดูแลระบบที่มอบหมายช่างได้");
-      const { data: id, error } = await supabaseAsUser(viewer.accessToken).rpc(
-        "create_repair_job",
-        {
-          p_customer_name: data.customerName,
-          p_customer_phone: data.phone,
-          p_contact_name: data.contactName ?? null,
-          p_customer_address: data.address,
-          p_appliance_type: data.machineType,
-          p_brand: data.brand,
-          p_model: data.model,
-          p_serial_number: data.serialNo ?? null,
-          p_symptom: data.symptom,
-          p_details: data.details ?? null,
-          p_technician_id: data.technicianId ?? null,
-          p_appointment_at: data.appointmentAt ?? null,
-          p_urgency: data.urgency,
-          p_note: data.note ?? null,
-          p_idempotency_key: crypto.randomUUID(),
-        },
-      );
-      if (error) return fail(error.message || dbError);
-      const job = await loadJob(
-        typeof id === "string" ? id : String((id as Row)?.id ?? ""),
-      );
+
+      const admin = supabaseAdmin();
+      const firstItem = data.items?.[0];
+      const applianceType = firstItem?.applianceType || data.machineType || "อื่นๆ";
+      const brand = firstItem?.brand || data.brand || "-";
+      const model = firstItem?.model || data.model || "-";
+      const serialNumber = firstItem?.serialNumber || data.serialNo || null;
+      const purchaseDate = firstItem?.purchaseDate || null;
+      const symptom = firstItem?.symptom || data.symptom || "-";
+      const details = firstItem?.details || data.details || null;
+
+      const combinedNote = [data.note, details ? `รายละเอียดเพิ่มเติม: ${details}` : null]
+        .filter(Boolean)
+        .join("\n") || null;
+
+      const { data: existingJobs } = await admin
+        .from("repair_jobs")
+        .select("job_no");
+      const mappedExisting = (existingJobs ?? []).map((r) => ({
+        jobNo: r.job_no,
+      })) as unknown as RepairJob[];
+      const jobNo = generateJobNo(mappedExisting);
+
+      const initialStatus = data.technicianId ? "ASSIGNED" : "WAITING_ASSIGN";
+      const now = new Date().toISOString();
+
+      const { data: createdJob, error: insertError } = await admin
+        .from("repair_jobs")
+        .insert({
+          job_no: jobNo,
+          customer_name: data.customerName,
+          customer_phone: data.phone,
+          contact_name: data.contactName ?? null,
+          customer_address: data.address,
+          appliance_type: applianceType,
+          brand,
+          model,
+          brand_model: `${brand} ${model}`.trim(),
+          serial_number: serialNumber,
+          purchase_date: purchaseDate,
+          symptom,
+          status: initialStatus,
+          technician_id: data.technicianId ?? null,
+          appointment_at: data.appointmentAt ?? null,
+          urgency: data.urgency || "LOW",
+          note: combinedNote,
+          created_by: profile.id,
+          history: [
+            {
+              id: crypto.randomUUID(),
+              from: null,
+              to: initialStatus,
+              at: now,
+              by: profile.id,
+              note: "รับแจ้งงานซ่อมเข้าระบบ",
+            },
+          ],
+        })
+        .select("id")
+        .single();
+
+      if (insertError || !createdJob)
+        return fail(insertError?.message || dbError);
+
+      if (data.items && data.items.length > 0) {
+        const itemRows = data.items.map((item) => ({
+          job_id: createdJob.id,
+          appliance_type: item.applianceType,
+          brand: item.brand,
+          model: item.model,
+          serial_number: item.serialNumber ?? null,
+          purchase_date: item.purchaseDate || null,
+          symptom: item.symptom,
+          details: item.details ?? null,
+        }));
+        await admin.from("repair_job_items").insert(itemRows);
+      }
+
+      const job = await loadJob(createdJob.id);
       return job
         ? { ok: true, value: job }
         : fail("สร้างใบงานแล้วแต่โหลดข้อมูลไม่สำเร็จ");
@@ -222,7 +289,6 @@ export const updateRepairJob = createServerFn({ method: "POST" })
     }
   });
 
-// 🟢 แก้ไข: เปลี่ยนสถานะพร้อมบันทึกประวัติ (History) ลง DB โดยตรง
 export const changeRepairJobStatus = createServerFn({ method: "POST" })
   .validator(
     z.object({
@@ -258,7 +324,9 @@ export const changeRepairJobStatus = createServerFn({ method: "POST" })
         .eq("id", data.id)
         .single();
 
-      const currentHistory = Array.isArray(currentJob?.history) ? currentJob.history : [];
+      const currentHistory = Array.isArray(currentJob?.history)
+        ? currentJob.history
+        : [];
       const now = new Date().toISOString();
 
       const newHistoryItem = {
@@ -309,7 +377,6 @@ export const assignRepairTechnician = createServerFn({ method: "POST" })
     }
   });
 
-// 🟢 แก้ไข: รับเข้า/ตัด/ปรับ สต๊อกอะไหล่ได้ครบทุกกรณี
 export const moveInventoryStock = createServerFn({ method: "POST" })
   .validator(
     z.object({
