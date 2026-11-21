@@ -23,6 +23,13 @@ const MAX_PHOTOS = 6
 const MAX_BYTES = 5 * 1024 * 1024
 const ACCEPT = ['image/jpeg', 'image/png', 'image/webp', 'image/heic']
 
+interface ThaiAddressEntry {
+  district: string // ตำบล/แขวง
+  amphoe: string // อำเภอ/เขต
+  province: string // จังหวัด
+  zipcode: number | string
+}
+
 interface JobItemState {
   applianceType: string
   brand: string
@@ -42,9 +49,68 @@ function NewJob() {
   const [photos, setPhotos] = React.useState<File[]>([])
   const [pending, setPending] = React.useState(false)
 
+  // ฐานข้อมูล จังหวัด / อำเภอ / ตำบล ของประเทศไทย
+  const [thaiDb, setThaiDb] = React.useState<ThaiAddressEntry[]>([])
+  const [loadingThaiDb, setLoadingThaiDb] = React.useState(true)
+  const [addressDetail, setAddressDetail] = React.useState('')
+  const [province, setProvince] = React.useState('สงขลา')
+  const [amphoe, setAmphoe] = React.useState('หาดใหญ่')
+  const [district, setDistrict] = React.useState('')
+  const [zipcode, setZipcode] = React.useState('')
+
+  React.useEffect(() => {
+    let active = true
+    fetch('https://raw.githubusercontent.com/earthchie/jquery.Thailand.js/master/jquery.Thailand.js/database/raw_database/raw_database.json')
+      .then((res) => res.json())
+      .then((data: ThaiAddressEntry[]) => {
+        if (!active) return
+        setThaiDb(data)
+        setLoadingThaiDb(false)
+      })
+      .catch(() => {
+        if (!active) return
+        setLoadingThaiDb(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  // รายชื่อจังหวัดทั้งหมด (เรียงตามตัวอักษร)
+  const provinces = React.useMemo(() => {
+    const set = new Set(thaiDb.map((d) => d.province))
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'th'))
+  }, [thaiDb])
+
+  // รายชื่ออำเภอตามจังหวัดที่เลือก
+  const amphoes = React.useMemo(() => {
+    if (!province) return []
+    const set = new Set(thaiDb.filter((d) => d.province === province).map((d) => d.amphoe))
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'th'))
+  }, [thaiDb, province])
+
+  // รายชื่อตำบลตามจังหวัดและอำเภอที่เลือก
+  const districts = React.useMemo(() => {
+    if (!province || !amphoe) return []
+    return thaiDb
+      .filter((d) => d.province === province && d.amphoe === amphoe)
+      .sort((a, b) => a.district.localeCompare(b.district, 'th'))
+  }, [thaiDb, province, amphoe])
+
+  // อัปเดตรหัสไปรษณีย์อัตโนมัติเมื่อเลือกตำบล
+  const handleDistrictChange = (selectedDistrict: string) => {
+    setDistrict(selectedDistrict)
+    const found = districts.find((d) => d.district === selectedDistrict)
+    if (found) {
+      setZipcode(String(found.zipcode))
+    } else {
+      setZipcode('')
+    }
+  }
+
   // รายการเครื่องแจ้งซ่อม (เริ่มต้น 1 เครื่อง)
   const [items, setItems] = React.useState<JobItemState[]>([
-    { applianceType: MACHINE_TYPES[0] || 'เครื่องซักผ้าฝาบน', brand: '', model: '', symptom: '' },
+    { applianceType: MACHINE_TYPES[0] || 'เครื่องซักฝาบน', brand: '', model: '', symptom: '' },
   ])
 
   const techs = profiles.filter((p) => p.role === 'TECH')
@@ -54,7 +120,7 @@ function NewJob() {
   const handleAddItem = () => {
     setItems((prev) => [
       ...prev,
-      { applianceType: MACHINE_TYPES[0] || 'เครื่องซักผ้าฝาบน', brand: '', model: '', symptom: '' },
+      { applianceType: MACHINE_TYPES[0] || 'เครื่องซักฝาบน', brand: '', model: '', symptom: '' },
     ])
   }
 
@@ -96,11 +162,32 @@ function NewJob() {
 
     if (!v('customerName')) e.customerName = 'กรุณากรอกชื่อลูกค้า'
     if (!/^0\d{8,9}$/.test(v('phone').replace(/[-\s]/g, ''))) e.phone = 'เบอร์โทรไม่ถูกต้อง'
-    if (!v('address')) e.address = 'กรุณากรอกที่อยู่หรือสถานที่ติดตั้ง'
+
+    // ประกอบที่อยู่ฉบับเต็มจากช่องกรอก + จังหวัด/อำเภอ/ตำบล
+    const isBkk = province === 'กรุงเทพมหานคร'
+    const subdistrictPrefix = isBkk ? 'แขวง' : 'ต.'
+    const districtPrefix = isBkk ? 'เขต' : 'อ.'
+    const provincePrefix = isBkk ? '' : 'จ.'
+
+    const fullAddress = [
+      addressDetail.trim(),
+      district ? `${subdistrictPrefix}${district}` : '',
+      amphoe ? `${districtPrefix}${amphoe}` : '',
+      province ? `${provincePrefix}${province}` : '',
+      zipcode.trim(),
+    ]
+      .filter(Boolean)
+      .join(' ')
+
+    if (!addressDetail.trim() && !province) {
+      e.address = 'กรุณากรอกที่อยู่และเลือกจังหวัด/อำเภอ/ตำบล'
+    } else if (thaiDb.length > 0 && (!province || !amphoe || !district)) {
+      e.address = 'กรุณาเลือกจังหวัด อำเภอ และตำบลให้ครบถ้วน'
+    }
 
     // ตรวจสอบความถูกต้องของรายการเครื่องซ่อมทุกชิ้น
     let hasItemError = false
-    items.forEach((item, index) => {
+    items.forEach((item) => {
       if (!item.brand.trim() || !item.model.trim() || !item.symptom.trim()) {
         hasItemError = true
       }
@@ -111,7 +198,7 @@ function NewJob() {
 
     setErrors(e)
     if (Object.keys(e).length) {
-      toast.error(e.items || 'กรุณาตรวจสอบข้อมูลที่ไฮไลต์')
+      toast.error(e.items || e.address || 'กรุณาตรวจสอบข้อมูลที่ไฮไลต์')
       return
     }
 
@@ -120,8 +207,7 @@ function NewJob() {
       customerName: v('customerName'),
       phone: v('phone'),
       contactName: v('contactName') || undefined,
-      address: v('address'),
-      // ส่งรายการเครื่องทั้งหมดไปบันทึก
+      address: fullAddress,
       items: items.map((i) => ({
         applianceType: i.applianceType,
         brand: i.brand.trim(),
@@ -162,11 +248,85 @@ function NewJob() {
               <Field label="เบอร์โทรศัพท์" htmlFor="phone" error={errors.phone} required>
                 <Input id="phone" name="phone" type="tel" inputMode="tel" className="h-11 font-ticket" placeholder="08x-xxx-xxxx" />
               </Field>
-              <Field label="ชื่อผู้ติดต่อ" htmlFor="contactName">
+              <Field label="ชื่อผู้ติดต่อ" htmlFor="contactName" className="sm:col-span-2">
                 <Input id="contactName" name="contactName" className="h-11" />
               </Field>
-              <Field label="ที่อยู่หรือสถานที่ติดตั้ง" htmlFor="address" error={errors.address} required className="sm:col-span-2">
-                <Textarea id="address" name="address" rows={2} />
+
+              {/* ที่อยู่แบบเลือก จังหวัด / อำเภอ / ตำบล */}
+              <Field label="บ้านเลขที่ / ซอย / ถนน / ชื่อสถานที่" htmlFor="addressDetail" error={errors.address} required className="sm:col-span-2">
+                <Textarea
+                  id="addressDetail"
+                  rows={2}
+                  placeholder="เช่น 123/4 หมู่ 2 ถ.เพชรเกษม (ร้านซักอบรีด...)"
+                  value={addressDetail}
+                  onChange={(e) => setAddressDetail(e.target.value)}
+                />
+              </Field>
+
+              <Field label="จังหวัด" htmlFor="province" required>
+                <select
+                  id="province"
+                  className="native-select"
+                  value={province}
+                  disabled={loadingThaiDb}
+                  onChange={(e) => {
+                    setProvince(e.target.value)
+                    setAmphoe('')
+                    setDistrict('')
+                    setZipcode('')
+                  }}
+                >
+                  <option value="">{loadingThaiDb ? 'กำลังโหลดข้อมูลจังหวัด...' : '— เลือกจังหวัด —'}</option>
+                  {provinces.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="อำเภอ / เขต" htmlFor="amphoe" required>
+                <select
+                  id="amphoe"
+                  className="native-select"
+                  value={amphoe}
+                  disabled={!province || loadingThaiDb}
+                  onChange={(e) => {
+                    setAmphoe(e.target.value)
+                    setDistrict('')
+                    setZipcode('')
+                  }}
+                >
+                  <option value="">— เลือกอำเภอ / เขต —</option>
+                  {amphoes.map((a) => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="ตำบล / แขวง" htmlFor="district" required>
+                <select
+                  id="district"
+                  className="native-select"
+                  value={district}
+                  disabled={!amphoe || loadingThaiDb}
+                  onChange={(e) => handleDistrictChange(e.target.value)}
+                >
+                  <option value="">— เลือกตำบล / แขวง —</option>
+                  {districts.map((d, idx) => (
+                    <option key={`${d.district}-${idx}`} value={d.district}>
+                      {d.district}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="รหัสไปรษณีย์" htmlFor="zipcode">
+                <Input
+                  id="zipcode"
+                  className="h-11 font-ticket"
+                  placeholder="รหัสไปรษณีย์"
+                  value={zipcode}
+                  onChange={(e) => setZipcode(e.target.value)}
+                />
               </Field>
             </div>
           </Panel>
@@ -348,7 +508,7 @@ function NewJob() {
                 <Input id="appointmentAt" name="appointmentAt" type="datetime-local" className="h-11" />
               </Field>
               <Field label="ระดับความเร่งด่วน" htmlFor="urgency">
-                <select id="urgency" name="urgency" className="native-select" defaultValue="NORMAL">
+                <select id="urgency" name="urgency" className="native-select" defaultValue="LOW">
                   {(Object.keys(URGENCY_LABEL) as UrgencyLevel[]).map((u) => <option key={u} value={u}>{URGENCY_LABEL[u]}</option>)}
                 </select>
               </Field>
