@@ -12,7 +12,6 @@ import {
   Wrench,
 } from 'lucide-react'
 import { toast } from 'sonner'
-
 import { EmptyState, Field, JobNo, Panel, StatusBadge } from '@/components/app/shell'
 import { Button } from '@/components/ui/button'
 import {
@@ -57,9 +56,7 @@ function JobDetail() {
   const { jobId } = Route.useParams()
   const { jobs, currentUser } = useAppStore()
   const job = jobs.find((j) => j.id === jobId)
-  const canSee =
-    job && (currentUser?.role !== 'TECH' || job.technicianId === currentUser.id)
-
+  const canSee = job && (currentUser?.role !== 'TECH' || job.technicianId === currentUser.id)
   if (!job || !canSee) {
     return (
       <EmptyState
@@ -83,7 +80,6 @@ function JobView({ job }: { job: RepairJob }) {
   const [statusOpen, setStatusOpen] = React.useState(false)
   const [partOpen, setPartOpen] = React.useState(false)
   const [editCustomerOpen, setEditCustomerOpen] = React.useState(false)
-
   // สถานะเลือกรูปแบบการพิมพ์: 'FIELD' = ใบช่างออกหน้างาน, 'COMPLETE' = ใบซ่อมเสร็จ/ส่งคืน
   const [printMode, setPrintMode] = React.useState<'FIELD' | 'COMPLETE'>('FIELD')
 
@@ -91,6 +87,7 @@ function JobView({ job }: { job: RepairJob }) {
   const canWork = role === 'ADMIN' || (role === 'TECH' && job.technicianId === currentUser!.id)
   const canEditCustomer = role === 'ADMIN' || role === 'FRONT'
   const closed = job.status === 'COMPLETED' || job.status === 'CANCELLED'
+  const brandLabel = job.brand?.trim() || 'ผู้ผลิต'
 
   const historyList =
     Array.isArray(job.history) && job.history.length > 0
@@ -245,7 +242,6 @@ function JobView({ job }: { job: RepairJob }) {
                 <div className="mt-1 border-b border-dotted border-black pt-4" />
                 <div className="mt-1 border-b border-dotted border-black pt-4" />
               </div>
-
               <div>
                 <p className="font-semibold">รายละเอียดการซ่อม / การแก้ไข:</p>
                 <div className="mt-1 border-b border-dotted border-black pt-4" />
@@ -298,8 +294,17 @@ function JobView({ job }: { job: RepairJob }) {
             </div>
           </div>
 
+          {/* เงื่อนไขการรับประกันอะไหล่ */}
+          <div className="mt-2 border border-black bg-gray-50 px-2.5 py-1.5 text-[11px] leading-snug">
+            <p>
+              <span className="font-bold">เงื่อนไขการรับประกัน:</span> อะไหล่แท้จาก{' '}
+              <span className="font-bold underline">ศูนย์ {brandLabel}</span> รับประกัน 1 เดือน นับจากวันที่ส่งมอบงานซ่อม
+              (เฉพาะอะไหล่รายการเดิมและอาการเสียเดิมเท่านั้น ไม่ครอบคลุมความเสียหายจากภัยธรรมชาติ ไฟตก/ไฟเกิน หรือการใช้งานผิดประเภท)
+            </p>
+          </div>
+
           {/* ช่องลายมือชื่อ 3 ช่อง */}
-          <div className="mt-3 grid grid-cols-3 gap-4 border border-black p-2.5 text-center text-[11.5px]">
+          <div className="mt-2.5 grid grid-cols-3 gap-4 border border-black p-2.5 text-center text-[11.5px]">
             <div>
               <p className="font-semibold">ผู้รับบริการ / ลูกค้า</p>
               <div className="mx-auto mt-7 w-4/5 border-b border-black" />
@@ -396,7 +401,16 @@ function JobView({ job }: { job: RepairJob }) {
             )}
           </div>
 
-          <div className="mt-4 grid grid-cols-3 gap-4 border border-black p-3 text-center text-[11.5px]">
+          {/* เงื่อนไขการรับประกันอะไหล่ */}
+          <div className="mt-2.5 border border-black bg-gray-50 px-3 py-2 text-[11px] leading-snug">
+            <p>
+              <span className="font-bold">เงื่อนไขการรับประกัน:</span> อะไหล่แท้จาก{' '}
+              <span className="font-bold underline">ศูนย์ {brandLabel}</span> รับประกัน 1 เดือน นับจากวันที่ส่งมอบงานซ่อม
+              (เฉพาะอะไหล่รายการเดิมและอาการเสียเดิมเท่านั้น ไม่ครอบคลุมความเสียหายจากภัยธรรมชาติ ไฟตก/ไฟเกิน หรือการใช้งานผิดประเภท)
+            </p>
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-4 border border-black p-3 text-center text-[11.5px]">
             <div>
               <p className="font-semibold">ลูกค้าผู้ตรวจรับมอบสินค้าคืน</p>
               <div className="mx-auto mt-8 w-4/5 border-b border-black" />
@@ -445,7 +459,6 @@ function JobView({ job }: { job: RepairJob }) {
               </span>
             </div>
           </div>
-
           <div className="no-print mt-4 flex flex-wrap gap-2">
             {next.length > 0 && (canWork || role === 'FRONT') ? (
               <Button onClick={() => setStatusOpen(true)} className="bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90">
@@ -523,7 +536,6 @@ function JobView({ job }: { job: RepairJob }) {
 
           <div className="grid h-fit gap-4">
             <AssignPanel job={job} />
-
             <Panel title="ประวัติการทำงาน">
               <ol className="relative ml-2 border-l-2 border-border pt-1">
                 {historyList.map((h, i) => (
@@ -637,7 +649,6 @@ function AssignPanel({ job }: { job: RepairJob }) {
   const techs = profiles.filter((p) => p.role === 'TECH' && p.active)
   const isAdmin = currentUser?.role === 'ADMIN'
   const closed = job.status === 'COMPLETED' || job.status === 'CANCELLED'
-
   return (
     <Panel title="ช่างผู้รับผิดชอบ">
       {isAdmin && !closed ? (
@@ -675,6 +686,7 @@ function EditCustomerDialog({
   onOpenChange: (v: boolean) => void
 }) {
   const { updateJob } = useAppStore()
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
