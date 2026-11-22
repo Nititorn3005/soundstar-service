@@ -46,7 +46,10 @@ async function loadJob(id: string): Promise<RepairJob | null> {
     .eq("id", id)
     .is("deleted_at", null)
     .maybeSingle();
-  if (error) throw new Error(dbError);
+  if (error) {
+    console.error("[loadJob] error:", error);
+    throw new Error(dbError);
+  }
   if (!data) return null;
   const { data: txRows, error: txError } = await supabaseAdmin()
     .from("inventory_transactions")
@@ -128,30 +131,30 @@ export const getAppData = createServerFn({ method: "GET" }).handler(
 const jobItemSchema = z.object({
   applianceType: z.string().trim().min(1).max(120),
   brand: z.string().trim().min(1).max(120),
-  model: z.string().trim().min(1).max(120),
-  serialNumber: z.string().max(120).optional(),
-  purchaseDate: z.string().optional(),
+  model: z.string().trim().max(120).nullish(),
+  serialNumber: z.string().max(120).nullish(),
+  purchaseDate: z.string().nullish(),
   symptom: z.string().trim().min(1).max(2000),
-  details: z.string().max(5000).optional(),
+  details: z.string().max(5000).nullish(),
 });
 
 const jobInput = z.object({
   customerName: z.string().trim().min(1).max(200),
   phone: z.string().trim().min(1).max(40),
-  contactName: z.string().max(200).optional(),
+  contactName: z.string().max(200).nullish(),
   address: z.string().trim().min(1).max(1000),
-  items: z.array(jobItemSchema).min(1).optional(),
-  machineType: z.string().max(120).optional(),
-  brand: z.string().max(120).optional(),
-  model: z.string().max(120).optional(),
-  serialNo: z.string().max(120).optional(),
-  symptom: z.string().max(2000).optional(),
-  details: z.string().max(5000).optional(),
-  technicianId: z.string().uuid().optional(),
-  appointmentAt: z.string().optional(),
-  urgency: z.string().default("LOW"),
-  note: z.string().max(5000).optional(),
-  photos: z.number().int().min(0).max(6).optional(),
+  items: z.array(jobItemSchema).min(1).nullish(),
+  machineType: z.string().max(120).nullish(),
+  brand: z.string().max(120).nullish(),
+  model: z.string().max(120).nullish(),
+  serialNo: z.string().max(120).nullish(),
+  symptom: z.string().max(2000).nullish(),
+  details: z.string().max(5000).nullish(),
+  technicianId: z.string().max(100).nullish(),
+  appointmentAt: z.string().nullish(),
+  urgency: z.string().nullish(),
+  note: z.string().max(5000).nullish(),
+  photos: z.number().int().min(0).max(6).nullish(),
 });
 
 export const createRepairJob = createServerFn({ method: "POST" })
@@ -160,22 +163,24 @@ export const createRepairJob = createServerFn({ method: "POST" })
     try {
       const viewer = await viewerWithRole(["ADMIN", "FRONT", "RECEPTION"]);
       const { profile } = viewer;
-      if (profile.role !== "ADMIN" && data.technicianId)
+      const techId = data.technicianId?.trim() || null;
+      if (profile.role !== "ADMIN" && techId)
         return fail("เฉพาะผู้ดูแลระบบที่มอบหมายช่างได้");
 
       const admin = supabaseAdmin();
       const firstItem = data.items?.[0];
       const applianceType = firstItem?.applianceType || data.machineType || "อื่นๆ";
       const brand = firstItem?.brand || data.brand || "-";
-      const model = firstItem?.model || data.model || "-";
-      const serialNumber = firstItem?.serialNumber || data.serialNo || null;
-      const purchaseDate = firstItem?.purchaseDate || null;
+      const model = (firstItem?.model || data.model || "").trim() || "-";
+      const serialNumber = (firstItem?.serialNumber || data.serialNo || "").trim() || null;
+      const purchaseDate = (firstItem?.purchaseDate || "").trim() || null;
       const symptom = firstItem?.symptom || data.symptom || "-";
-      const details = firstItem?.details || data.details || null;
+      const details = (firstItem?.details || data.details || "").trim() || null;
 
-      const combinedNote = [data.note, details ? `รายละเอียดเพิ่มเติม: ${details}` : null]
-        .filter(Boolean)
-        .join("\n") || null;
+      const combinedNote =
+        [data.note?.trim(), details ? `รายละเอียดเพิ่มเติม: ${details}` : null]
+          .filter(Boolean)
+          .join("\n") || null;
 
       const { data: existingJobs } = await admin
         .from("repair_jobs")
@@ -185,7 +190,7 @@ export const createRepairJob = createServerFn({ method: "POST" })
       })) as unknown as RepairJob[];
       const jobNo = generateJobNo(mappedExisting);
 
-      const initialStatus = data.technicianId ? "ASSIGNED" : "WAITING_ASSIGN";
+      const initialStatus = techId ? "ASSIGNED" : "WAITING_ASSIGN";
       const now = new Date().toISOString();
 
       const { data: createdJob, error: insertError } = await admin
@@ -194,7 +199,7 @@ export const createRepairJob = createServerFn({ method: "POST" })
           job_no: jobNo,
           customer_name: data.customerName,
           customer_phone: data.phone,
-          contact_name: data.contactName ?? null,
+          contact_name: data.contactName?.trim() || null,
           customer_address: data.address,
           appliance_type: applianceType,
           brand,
@@ -204,8 +209,8 @@ export const createRepairJob = createServerFn({ method: "POST" })
           purchase_date: purchaseDate,
           symptom,
           status: initialStatus,
-          technician_id: data.technicianId ?? null,
-          appointment_at: data.appointmentAt ?? null,
+          technician_id: techId,
+          appointment_at: data.appointmentAt?.trim() || null,
           urgency: data.urgency || "LOW",
           note: combinedNote,
           created_by: profile.id,
@@ -223,19 +228,21 @@ export const createRepairJob = createServerFn({ method: "POST" })
         .select("id")
         .single();
 
-      if (insertError || !createdJob)
+      if (insertError || !createdJob) {
+        console.error("[createRepairJob] insertError:", insertError);
         return fail(insertError?.message || dbError);
+      }
 
       if (data.items && data.items.length > 0) {
         const itemRows = data.items.map((item) => ({
           job_id: createdJob.id,
           appliance_type: item.applianceType,
           brand: item.brand,
-          model: item.model,
-          serial_number: item.serialNumber ?? null,
-          purchase_date: item.purchaseDate || null,
+          model: (item.model || "").trim() || "-",
+          serial_number: (item.serialNumber || "").trim() || null,
+          purchase_date: (item.purchaseDate || "").trim() || null,
           symptom: item.symptom,
-          details: item.details ?? null,
+          details: (item.details || "").trim() || null,
         }));
         await admin.from("repair_job_items").insert(itemRows);
       }
@@ -245,16 +252,17 @@ export const createRepairJob = createServerFn({ method: "POST" })
         ? { ok: true, value: job }
         : fail("สร้างใบงานแล้วแต่โหลดข้อมูลไม่สำเร็จ");
     } catch (error) {
+      console.error("[createRepairJob] catch:", error);
       return fail(error instanceof Error ? error.message : dbError);
     }
   });
 
 const jobPatchSchema = z.object({
-  diagnosis: z.string().max(5000).optional(),
-  resolution: z.string().max(5000).optional(),
-  result: z.string().max(5000).optional(),
-  note: z.string().max(5000).optional(),
-  appointmentAt: z.string().datetime().optional(),
+  diagnosis: z.string().max(5000).nullish(),
+  resolution: z.string().max(5000).nullish(),
+  result: z.string().max(5000).nullish(),
+  note: z.string().max(5000).nullish(),
+  appointmentAt: z.string().nullish(),
 });
 
 export const updateRepairJob = createServerFn({ method: "POST" })
@@ -285,6 +293,7 @@ export const updateRepairJob = createServerFn({ method: "POST" })
         ? fail(error.message || dbError)
         : { ok: true, value: undefined };
     } catch (error) {
+      console.error("[updateRepairJob] catch:", error);
       return fail(error instanceof Error ? error.message : dbError);
     }
   });
@@ -303,7 +312,7 @@ export const changeRepairJobStatus = createServerFn({ method: "POST" })
         "COMPLETED",
         "CANCELLED",
       ]),
-      note: z.string().max(1000).optional(),
+      note: z.string().max(1000).nullish(),
     }),
   )
   .handler(async ({ data }): Promise<Result> => {
@@ -354,7 +363,10 @@ export const changeRepairJobStatus = createServerFn({ method: "POST" })
         })
         .eq("id", data.id);
 
-      if (error) return fail(error.message || dbError);
+      if (error) {
+        console.error("[changeRepairJobStatus] update error:", error);
+        return fail(error.message || dbError);
+      }
 
       await admin
         .from("repair_job_history")
@@ -371,6 +383,7 @@ export const changeRepairJobStatus = createServerFn({ method: "POST" })
 
       return { ok: true, value: undefined };
     } catch (error) {
+      console.error("[changeRepairJobStatus] catch:", error);
       return fail(error instanceof Error ? error.message : dbError);
     }
   });
@@ -406,9 +419,9 @@ export const moveInventoryStock = createServerFn({ method: "POST" })
         .number()
         .int()
         .refine((n) => n !== 0),
-      jobId: z.string().uuid().optional(),
-      reference: z.string().max(200).optional(),
-      reason: z.string().max(1000).optional(),
+      jobId: z.string().uuid().nullish(),
+      reference: z.string().max(200).nullish(),
+      reason: z.string().max(1000).nullish(),
     }),
   )
   .handler(async ({ data }): Promise<Result<InventoryTx>> => {
@@ -503,7 +516,7 @@ const itemSchema = z.object({
   minQty: z.number().min(0),
   cost: z.number().min(0),
   location: z.string().max(200),
-  note: z.string().max(1000).optional(),
+  note: z.string().max(1000).nullish(),
 });
 
 export const saveInventoryItem = createServerFn({ method: "POST" })
@@ -542,7 +555,7 @@ const createUserSchema = z.object({
   username: z.string().max(64),
   role: z.enum(["ADMIN", "FRONT", "TECH"]),
   active: z.boolean(),
-  phone: z.string().max(40).optional(),
+  phone: z.string().max(40).nullish(),
   password: z.string().max(200),
   confirm: z.string().max(200),
 });
@@ -700,7 +713,7 @@ export const saveCompany = createServerFn({ method: "POST" })
       nameEn: z.string().max(200),
       address: z.string().trim().min(1).max(1000),
       phones: z.string().trim().min(1).max(200),
-      taxId: z.string().max(40).optional(),
+      taxId: z.string().max(40).nullish(),
     }),
   )
   .handler(async ({ data }): Promise<Result> => {
