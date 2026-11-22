@@ -79,11 +79,24 @@ export const NAV: NavItem[] = [
 ]
 
 export function Brand({ className }: { className?: string }) {
+  const [logoFailed, setLogoFailed] = React.useState(false)
+
   return (
     <span className={cn('flex items-center gap-3', className)}>
-      <span className="grid size-10 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground shadow-[inset_0_-3px_0_oklch(0_0_0/0.15)]">
-        <WashingMachine className="size-5" aria-hidden />
-      </span>
+      {!logoFailed ? (
+        <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-white p-1 shadow-[inset_0_-3px_0_oklch(0_0_0/0.12)]">
+          <img
+            src="/logo.png"
+            alt="Hatyai Soundstar"
+            className="size-full object-contain"
+            onError={() => setLogoFailed(true)}
+          />
+        </span>
+      ) : (
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground shadow-[inset_0_-3px_0_oklch(0_0_0/0.15)]">
+          <WashingMachine className="size-5" aria-hidden />
+        </span>
+      )}
       <span className="leading-tight">
         <span className="block font-display text-base font-bold tracking-tight">
           Hatyai Soundstar
