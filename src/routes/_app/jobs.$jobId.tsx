@@ -77,6 +77,43 @@ function formatBrandModel(job: RepairJob): string {
   return [brand, model].filter(Boolean).join(' ') || '—'
 }
 
+function getElapsedRepairInfo(job: RepairJob): { days: number; label: string; tone: 'normal' | 'warn' | 'danger' | 'done' } {
+  const startMs = new Date(job.receivedAt).getTime()
+  if (Number.isNaN(startMs)) return { days: 0, label: 'แจ้งวันนี้', tone: 'normal' }
+
+  const isClosed = job.status === 'COMPLETED' || job.status === 'CANCELLED'
+  let endMs = Date.now()
+  if (isClosed) {
+    if (Array.isArray(job.history)) {
+      const endEntry = [...job.history].reverse().find((h) => h.to === job.status)
+      if (endEntry?.at) endMs = new Date(endEntry.at).getTime()
+    } else if ((job as RepairJob & { updatedAt?: string }).updatedAt) {
+      endMs = new Date((job as RepairJob & { updatedAt?: string }).updatedAt!).getTime()
+    }
+  }
+
+  const diffDays = Math.max(0, Math.floor((endMs - startMs) / (1000 * 60 * 60 * 24)))
+  if (job.status === 'COMPLETED') {
+    return {
+      days: diffDays,
+      label: diffDays === 0 ? 'ซ่อมเสร็จภายในวันที่แจ้ง' : `ใช้เวลาซ่อม ${diffDays} วัน`,
+      tone: 'done',
+    }
+  }
+  if (job.status === 'CANCELLED') {
+    return {
+      days: diffDays,
+      label: diffDays === 0 ? 'ยกเลิกภายในวันที่แจ้ง' : `ยกเลิกหลังแจ้ง ${diffDays} วัน`,
+      tone: 'normal',
+    }
+  }
+  return {
+    days: diffDays,
+    label: diffDays === 0 ? 'แจ้งวันนี้' : `ผ่านมาแล้ว ${diffDays} วัน`,
+    tone: diffDays >= 7 ? 'danger' : diffDays >= 3 ? 'warn' : 'normal',
+  }
+}
+
 function toLocalDateTimeInput(iso?: string): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -167,6 +204,7 @@ function JobView({ job }: { job: RepairJob }) {
   const brandLabel = job.brand?.trim() || 'ผู้ผลิต'
   const machineTypeLabel = job.applianceType || job.machineType || '—'
   const brandModelText = formatBrandModel(job)
+  const elapsedInfo = getElapsedRepairInfo(job)
 
   const historyList =
     Array.isArray(job.history) && job.history.length > 0
@@ -198,7 +236,7 @@ function JobView({ job }: { job: RepairJob }) {
 
     const message = [
       `🔧 แจ้งงานซ่อม · Hatyai Soundstar`,
-      `เลขที่ใบงาน: ${job.jobNo} (${STATUS_LABEL[job.status]})`,
+      `เลขที่ใบงาน: ${job.jobNo} (${STATUS_LABEL[job.status]} · ${elapsedInfo.label})`,
       `ความเร่งด่วน: ${URGENCY_LABEL[job.urgency]} | นัดหมาย: ${apptText}`,
       `ช่างผู้รับผิดชอบ: ${techText}`,
       ``,
@@ -309,7 +347,7 @@ function JobView({ job }: { job: RepairJob }) {
 
           <div className="mt-2 grid grid-cols-3 border border-black bg-gray-100 px-2.5 py-1.5 text-[12px]">
             <div>
-              <span className="font-semibold">วันที่รับแจ้ง:</span> {fmtDateTime(job.receivedAt)}
+              <span className="font-semibold">วันที่รับแจ้ง:</span> {fmtDateTime(job.receivedAt)} ({elapsedInfo.label})
             </div>
             <div>
               <span className="font-semibold">วันที่นัดหมาย:</span>{' '}
@@ -590,9 +628,22 @@ function JobView({ job }: { job: RepairJob }) {
             <div>
               <p className="font-ticket text-xl font-bold tracking-wide text-sidebar-primary">{job.jobNo}</p>
               <h1 className="mt-0.5 font-display text-3xl font-bold tracking-tight">{job.customerName}</h1>
-              <p className="text-xs text-sidebar-foreground/80">
-                รับแจ้ง {fmtDateTime(job.receivedAt)} · โดย {profileName(job.receivedBy)}
-              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-sidebar-foreground/80">
+                <span>
+                  รับแจ้ง {fmtDateTime(job.receivedAt)} · โดย {profileName(job.receivedBy)}
+                </span>
+                <span
+                  className={cn(
+                    'rounded-full px-2.5 py-0.5 font-semibold',
+                    elapsedInfo.tone === 'danger' && 'bg-destructive text-white',
+                    elapsedInfo.tone === 'warn' && 'bg-amber-400 text-amber-950',
+                    elapsedInfo.tone === 'done' && 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-400/40',
+                    elapsedInfo.tone === 'normal' && 'bg-sidebar-accent text-sidebar-foreground',
+                  )}
+                >
+                  {elapsedInfo.label}
+                </span>
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={job.status} className="px-3 py-1 text-sm" />
