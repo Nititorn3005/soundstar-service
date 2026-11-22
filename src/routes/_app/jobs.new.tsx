@@ -26,6 +26,9 @@ import { MACHINE_TYPES, URGENCY_LABEL, fmtDateTime, type RepairJob, type Urgency
 import { useAppStore } from '@/lib/store'
 
 export const Route = createFileRoute('/_app/jobs/new')({
+  validateSearch: (search: Record<string, unknown>): { fromJobId?: string } => ({
+    fromJobId: typeof search.fromJobId === 'string' && search.fromJobId ? search.fromJobId : undefined,
+  }),
   head: () => ({ meta: [{ title: 'รับแจ้งงานซ่อม · Hatyai Soundstar' }] }),
   component: () => (
     <RoleGate roles={['ADMIN', 'FRONT', 'TECH']}>
@@ -128,6 +131,7 @@ function buildTechLineMessage(params: {
 }
 
 function NewJob() {
+  const { fromJobId } = Route.useSearch()
   const { createJob, profiles, currentUser, jobs } = useAppStore()
   const navigate = useNavigate()
   const [errors, setErrors] = React.useState<Errors>({})
@@ -268,12 +272,12 @@ function NewJob() {
     return Array.from(grouped.values()).slice(0, 4)
   }, [jobs, customerName, phone])
 
-  const applyCustomerHistory = (entry: {
+  const applyCustomerHistory = React.useCallback((entry: {
     customerName: string
     phone: string
     latestJob: RepairJob
     pastJobs: RepairJob[]
-  }) => {
+  }, silent = false) => {
     const j = entry.latestJob
     setCustomerName(j.customerName)
     setPhone(j.phone)
@@ -321,8 +325,30 @@ function NewJob() {
     }
 
     setAddressDetail(rawAddr.trim())
-    toast.success(`ดึงข้อมูลลูกค้า "${j.customerName}" เรียบร้อย`)
-  }
+    if (!silent) {
+      toast.success(`ดึงข้อมูลลูกค้า "${j.customerName}" เรียบร้อย`)
+    }
+  }, [])
+
+  // ดึงข้อมูลลูกค้าอัตโนมัติเมื่อกด "สร้างใบงานใหม่ (ลูกค้ารายนี้)" มาจากหน้าใบงานเดิม
+  const prefilledJobIdRef = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (!fromJobId || prefilledJobIdRef.current === fromJobId || jobs.length === 0) return
+    const sourceJob = jobs.find((j) => j.id === fromJobId)
+    if (!sourceJob) return
+    prefilledJobIdRef.current = fromJobId
+    const cleanPhone = sourceJob.phone.replace(/[-\s]/g, '')
+    const customerJobs = jobs.filter((x) => x.phone.replace(/[-\s]/g, '') === cleanPhone)
+    applyCustomerHistory(
+      {
+        customerName: sourceJob.customerName,
+        phone: sourceJob.phone,
+        latestJob: sourceJob,
+        pastJobs: customerJobs.length > 0 ? customerJobs : [sourceJob],
+      },
+      false,
+    )
+  }, [fromJobId, jobs, applyCustomerHistory])
 
   const applyMachineFromHistory = (pastJob: RepairJob) => {
     const newItem: JobItemState = {
