@@ -43,6 +43,7 @@ type StockMoveInput = {
   jobId?: string;
   reference?: string;
   reason?: string;
+  note?: string;
 };
 
 type AppStore = {
@@ -127,15 +128,15 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       const result = await request();
       if (result.ok) {
         void refresh().catch(() => {
-          alert("การเชื่อมต่อติดขัด: ระบบจะพยายามซิงค์ข้อมูลใหม่อีกครั้งเมื่ออินเทอร์เน็ตกลับมาใช้งานได้");
+          toast.error("การเชื่อมต่อติดขัด: ระบบจะซิงค์ข้อมูลใหม่อีกครั้งเมื่ออินเทอร์เน็ตกลับมาใช้งานได้");
         });
       } else {
-        alert(result.error || "ดำเนินการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+        toast.error(result.error || "ดำเนินการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
       }
       return result;
     } catch {
       const err = "การเชื่อมต่อเครือข่ายล้มเหลว กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่";
-      alert(err);
+      toast.error(err);
       return fail(err);
     }
   }
@@ -177,8 +178,30 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       return mutate(() => createRepairJob({ data: input }));
     },
 
-    updateJob(id, patch) {
-      return mutate(() => updateRepairJob({ data: { id, patch } }));
+    // อัปเดตหน้าจอทันที (0ms) เมื่อกดบันทึกผลซ่อมหรือแก้ไขข้อมูลลูกค้า
+    async updateJob(id, patch) {
+      const oldJobs = [...jobs];
+      const now = new Date().toISOString();
+      const nextJobs = jobs.map((j) =>
+        j.id === id ? { ...j, ...patch, updatedAt: now } : j
+      ) as RepairJob[];
+      setJobs(nextJobs);
+
+      try {
+        const result = await updateRepairJob({ data: { id, patch } });
+        if (!result.ok) {
+          setJobs(oldJobs);
+          toast.error(result.error || "บันทึกข้อมูลไม่สำเร็จ");
+          return result;
+        }
+        void refresh().catch(() => {});
+        return result;
+      } catch {
+        setJobs(oldJobs);
+        const err = "การเชื่อมต่อเครือข่ายล้มเหลว กรุณาตรวจสอบอินเทอร์เน็ต";
+        toast.error(err);
+        return fail(err);
+      }
     },
 
     async changeStatus(id, to, note) {
@@ -186,7 +209,6 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       const targetJob = jobs.find((j) => j.id === id);
       const now = new Date().toISOString();
 
-      // 🟢 เติม as RepairJob[] ด้านท้ายเพื่อป้องกัน TypeScript Error 100%
       const nextJobs = jobs.map((job) => {
         if (job.id !== id) return job;
         const currentHistory = Array.isArray(job.history) ? job.history : [];
@@ -212,11 +234,10 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         const result = await changeRepairJobStatus({ data: { id, to, note } });
         if (!result.ok) {
           setJobs(oldJobs);
-          alert(result.error || "เปลี่ยนสถานะไม่สำเร็จ");
+          toast.error(result.error || "เปลี่ยนสถานะไม่สำเร็จ");
           return result;
         }
 
-        // สรุปรายการอะไหล่ที่ตัดสต๊อกเมื่อปิดงานซ่อมเสร็จ (COMPLETED)
         if (to === "COMPLETED" && targetJob) {
           if (targetJob.parts && targetJob.parts.length > 0) {
             const summary = targetJob.parts
@@ -236,7 +257,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       } catch {
         setJobs(oldJobs);
         const errMsg = "เปลี่ยนสถานะไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ต";
-        alert(errMsg);
+        toast.error(errMsg);
         return fail(errMsg);
       }
     },
@@ -254,7 +275,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         const result = await assignRepairTechnician({ data: { id, technicianId } });
         if (!result.ok) {
           setJobs(oldJobs);
-          alert(result.error || "มอบหมายช่างไม่สำเร็จ");
+          toast.error(result.error || "มอบหมายช่างไม่สำเร็จ");
           return result;
         }
         void refresh().catch(() => {});
@@ -262,14 +283,17 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       } catch {
         setJobs(oldJobs);
         const errMsg = "มอบหมายช่างไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ต";
-        alert(errMsg);
+        toast.error(errMsg);
         return fail(errMsg);
       }
     },
 
+    // อัปเดตทั้งสต๊อกและรายการอะไหล่ในใบงานทันที (0ms)
     async moveStock(input) {
       const oldInventory = [...inventory];
+      const oldJobs = [...jobs];
       const targetItem = inventory.find((item) => item.id === input.partId);
+      const now = new Date().toISOString();
 
       const nextInventory = inventory.map((item) => {
         if (item.id !== input.partId) return item;
@@ -279,15 +303,35 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
 
       setInventory(nextInventory);
 
+      if (input.jobId) {
+        const nextJobs = jobs.map((job) => {
+          if (job.id !== input.jobId) return job;
+          const currentParts = Array.isArray(job.parts) ? [...job.parts] : [];
+          if (input.type === "OUT") {
+            currentParts.push({
+              partId: input.partId,
+              qty: input.qty,
+              at: now,
+              by: currentUser?.id ?? "",
+            });
+          } else if (input.type === "IN") {
+            const idx = currentParts.findIndex((p) => p.partId === input.partId && p.qty === input.qty);
+            if (idx !== -1) currentParts.splice(idx, 1);
+          }
+          return { ...job, parts: currentParts, updatedAt: now };
+        }) as RepairJob[];
+        setJobs(nextJobs);
+      }
+
       try {
         const result = await moveInventoryStock({ data: input });
         if (!result.ok) {
           setInventory(oldInventory);
-          alert(result.error || "เบิก/ปรับสต๊อกไม่สำเร็จ");
+          setJobs(oldJobs);
+          toast.error(result.error || "เบิก/ปรับสต๊อกไม่สำเร็จ");
           return result;
         }
 
-        // แจ้งเตือนทันทีหากเบิก/ปรับสต๊อกแล้วคงเหลือต่ำกว่าจุดสั่งซื้อ
         if (targetItem && input.type !== "IN") {
           const threshold =
             (targetItem as InventoryItem & { minStock?: number; reorderPoint?: number }).minStock ??
@@ -305,8 +349,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         return result;
       } catch {
         setInventory(oldInventory);
+        setJobs(oldJobs);
         const errMsg = "เบิก/ปรับสต๊อกไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ต";
-        alert(errMsg);
+        toast.error(errMsg);
         return fail(errMsg);
       }
     },
@@ -317,16 +362,50 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       );
     },
 
-    saveItem(item) {
-      return mutate(() => saveInventoryItem({ data: item }));
+    async saveItem(item) {
+      const oldInventory = [...inventory];
+      if (item.id) {
+        setInventory(inventory.map((x) => (x.id === item.id ? { ...x, ...item } : x)) as InventoryItem[]);
+      }
+      try {
+        const result = await saveInventoryItem({ data: item });
+        if (!result.ok) {
+          setInventory(oldInventory);
+          toast.error(result.error || "บันทึกข้อมูลอะไหล่ไม่สำเร็จ");
+          return result;
+        }
+        void refresh().catch(() => {});
+        return result;
+      } catch {
+        setInventory(oldInventory);
+        const err = "บันทึกข้อมูลอะไหล่ไม่สำเร็จ";
+        toast.error(err);
+        return fail(err);
+      }
     },
 
     createUser(input) {
       return mutate(() => createStaffUser({ data: input }));
     },
 
-    updateUser(id, patch) {
-      return mutate(() => updateStaffUser({ data: { id, patch } }));
+    async updateUser(id, patch) {
+      const oldProfiles = [...profiles];
+      setProfiles(profiles.map((p) => (p.id === id ? { ...p, ...patch } : p)) as Profile[]);
+      try {
+        const result = await updateStaffUser({ data: { id, patch } });
+        if (!result.ok) {
+          setProfiles(oldProfiles);
+          toast.error(result.error || "อัปเดตผู้ใช้งานไม่สำเร็จ");
+          return result;
+        }
+        void refresh().catch(() => {});
+        return result;
+      } catch {
+        setProfiles(oldProfiles);
+        const err = "อัปเดตผู้ใช้งานไม่สำเร็จ";
+        toast.error(err);
+        return fail(err);
+      }
     },
 
     resetUserPassword(id, password, confirm) {
@@ -335,8 +414,24 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       );
     },
 
-    updateCompany(c) {
-      return mutate(() => saveCompany({ data: { ...c, id: company.id } }));
+    async updateCompany(c) {
+      const oldCompany = { ...company };
+      setCompany(c);
+      try {
+        const result = await saveCompany({ data: { ...c, id: company.id } });
+        if (!result.ok) {
+          setCompany(oldCompany);
+          toast.error(result.error || "บันทึกข้อมูลบริษัทไม่สำเร็จ");
+          return result;
+        }
+        void refresh().catch(() => {});
+        return result;
+      } catch {
+        setCompany(oldCompany);
+        const err = "บันทึกข้อมูลบริษัทไม่สำเร็จ";
+        toast.error(err);
+        return fail(err);
+      }
     },
 
     profileName(id) {
