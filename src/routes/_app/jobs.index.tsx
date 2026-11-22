@@ -38,6 +38,43 @@ function getStaleDays(job: RepairJob): number {
   return diffDays >= 2 ? diffDays : 0
 }
 
+function getElapsedBadge(job: RepairJob): {
+  label: string
+  tone: 'normal' | 'warn' | 'danger' | 'done'
+} {
+  const startMs = new Date(job.receivedAt).getTime()
+  if (Number.isNaN(startMs)) return { label: 'แจ้งวันนี้', tone: 'normal' }
+
+  const isClosed = job.status === 'COMPLETED' || job.status === 'CANCELLED'
+  let endMs = Date.now()
+  if (isClosed) {
+    if (Array.isArray(job.history)) {
+      const endEntry = [...job.history].reverse().find((h) => h.to === job.status)
+      if (endEntry?.at) endMs = new Date(endEntry.at).getTime()
+    } else if ((job as RepairJob & { updatedAt?: string }).updatedAt) {
+      endMs = new Date((job as RepairJob & { updatedAt?: string }).updatedAt!).getTime()
+    }
+  }
+
+  const diffDays = Math.max(0, Math.floor((endMs - startMs) / (1000 * 60 * 60 * 24)))
+  if (job.status === 'COMPLETED') {
+    return {
+      label: diffDays === 0 ? 'ซ่อมเสร็จในวัน' : `ซ่อมเสร็จใน ${diffDays} วัน`,
+      tone: 'done',
+    }
+  }
+  if (job.status === 'CANCELLED') {
+    return {
+      label: diffDays === 0 ? 'ยกเลิกในวัน' : `ยกเลิกหลังแจ้ง ${diffDays} วัน`,
+      tone: 'normal',
+    }
+  }
+  return {
+    label: diffDays === 0 ? 'แจ้งวันนี้' : `ผ่านมาแล้ว ${diffDays} วัน`,
+    tone: diffDays >= 7 ? 'danger' : diffDays >= 3 ? 'warn' : 'normal',
+  }
+}
+
 function isAttentionNeeded(job: RepairJob): boolean {
   return isOverdue(job) || getStaleDays(job) >= 2
 }
@@ -163,7 +200,7 @@ function JobsList() {
           <ul className="grid gap-3 md:hidden">
             {rows.map((j) => {
               const overdue = isOverdue(j)
-              const staleDays = getStaleDays(j)
+              const elapsed = getElapsedBadge(j)
               return (
                 <li key={j.id}>
                   <Link
@@ -175,18 +212,24 @@ function JobsList() {
                     )}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <JobNo>{j.jobNo}</JobNo>
                         {overdue && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-destructive px-2 py-0.5 text-[10px] font-semibold text-white">
                             <AlertTriangle className="size-2.5" /> เกินนัด
                           </span>
                         )}
-                        {!overdue && staleDays > 0 && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                            <Clock className="size-2.5" /> ค้าง {staleDays} วัน
-                          </span>
-                        )}
+                        <span
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                            elapsed.tone === 'danger' && 'bg-destructive/15 text-destructive',
+                            elapsed.tone === 'warn' && 'bg-amber-100 text-amber-800',
+                            elapsed.tone === 'done' && 'bg-emerald-100 text-emerald-800',
+                            elapsed.tone === 'normal' && 'bg-secondary text-secondary-foreground',
+                          )}
+                        >
+                          <Clock className="size-2.5" /> {elapsed.label}
+                        </span>
                       </div>
                       <StatusBadge status={j.status} />
                     </div>
@@ -221,7 +264,7 @@ function JobsList() {
               <TableBody>
                 {rows.map((j) => {
                   const overdue = isOverdue(j)
-                  const staleDays = getStaleDays(j)
+                  const elapsed = getElapsedBadge(j)
                   return (
                     <TableRow
                       key={j.id}
@@ -237,11 +280,17 @@ function JobsList() {
                               <AlertTriangle className="size-2.5" /> เกินนัด
                             </span>
                           )}
-                          {!overdue && staleDays > 0 && (
-                            <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                              <Clock className="size-2.5" /> ค้าง {staleDays} วัน
-                            </span>
-                          )}
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                              elapsed.tone === 'danger' && 'bg-destructive/15 text-destructive',
+                              elapsed.tone === 'warn' && 'bg-amber-100 text-amber-800',
+                              elapsed.tone === 'done' && 'bg-emerald-100 text-emerald-800',
+                              elapsed.tone === 'normal' && 'bg-secondary text-secondary-foreground',
+                            )}
+                          >
+                            <Clock className="size-2.5" /> {elapsed.label}
+                          </span>
                         </div>
                         <p className="text-[11px] text-muted-foreground">{fmtDateTime(j.receivedAt)}</p>
                       </TableCell>
