@@ -4,6 +4,8 @@ import {
   ArrowLeft,
   ArrowRightLeft,
   Camera,
+  Check,
+  Copy,
   FileCheck2,
   FileSearch,
   PackageMinus,
@@ -52,6 +54,18 @@ export const Route = createFileRoute('/_app/jobs/$jobId')({
   component: JobDetail,
 })
 
+function cleanModel(model?: string): string {
+  if (!model) return ''
+  const trimmed = model.trim()
+  return trimmed === '-' ? '' : trimmed
+}
+
+function formatBrandModel(job: RepairJob): string {
+  const brand = job.brand?.trim() || ''
+  const model = cleanModel(job.model)
+  return [brand, model].filter(Boolean).join(' ') || '—'
+}
+
 function JobDetail() {
   const { jobId } = Route.useParams()
   const { jobs, currentUser } = useAppStore()
@@ -80,6 +94,7 @@ function JobView({ job }: { job: RepairJob }) {
   const [statusOpen, setStatusOpen] = React.useState(false)
   const [partOpen, setPartOpen] = React.useState(false)
   const [editCustomerOpen, setEditCustomerOpen] = React.useState(false)
+  const [copiedLine, setCopiedLine] = React.useState(false)
   // สถานะเลือกรูปแบบการพิมพ์: 'FIELD' = ใบช่างออกหน้างาน, 'COMPLETE' = ใบซ่อมเสร็จ/ส่งคืน
   const [printMode, setPrintMode] = React.useState<'FIELD' | 'COMPLETE'>('FIELD')
 
@@ -88,6 +103,8 @@ function JobView({ job }: { job: RepairJob }) {
   const canEditCustomer = role === 'ADMIN' || role === 'FRONT'
   const closed = job.status === 'COMPLETED' || job.status === 'CANCELLED'
   const brandLabel = job.brand?.trim() || 'ผู้ผลิต'
+  const machineTypeLabel = job.applianceType || job.machineType || '—'
+  const brandModelText = formatBrandModel(job)
 
   const historyList =
     Array.isArray(job.history) && job.history.length > 0
@@ -108,6 +125,41 @@ function JobView({ job }: { job: RepairJob }) {
     setTimeout(() => {
       window.print()
     }, 150)
+  }
+
+  const handleCopyTechLine = async () => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://soundstar-service.netlify.app'
+    const jobUrl = `${origin}/jobs/${job.id}`
+    const techText = job.technicianId ? profileName(job.technicianId) : 'รอมอบหมายช่าง'
+    const apptText = job.appointmentAt ? fmtDateTime(job.appointmentAt) : 'ตามสะดวก / นัดเพิ่ม'
+    const snPart = job.serialNo && job.serialNo.trim() !== '-' ? ` (S/N: ${job.serialNo.trim()})` : ''
+
+    const message = [
+      `🔧 แจ้งงานซ่อม · Hatyai Soundstar`,
+      `เลขที่ใบงาน: ${job.jobNo} (${STATUS_LABEL[job.status]})`,
+      `ความเร่งด่วน: ${URGENCY_LABEL[job.urgency]} | นัดหมาย: ${apptText}`,
+      `ช่างผู้รับผิดชอบ: ${techText}`,
+      ``,
+      `👤 ลูกค้า: ${job.customerName}${job.contactName ? ` (ติดต่อ: ${job.contactName})` : ''}`,
+      `📞 โทร: ${job.phone}`,
+      `📍 ที่อยู่: ${job.address}`,
+      ``,
+      `🧺 เครื่องซ่อม: ${brandModelText} (${machineTypeLabel})${snPart}`,
+      `⚠️ อาการเสีย: ${job.symptom}`,
+      ...(job.details ? [`📋 รายละเอียด: ${job.details}`] : []),
+      ...(job.note ? [`📝 หมายเหตุ: ${job.note}`] : []),
+      ``,
+      `🔗 ดูรายละเอียด/อัปเดตงาน: ${jobUrl}`,
+    ].join('\n')
+
+    try {
+      await navigator.clipboard.writeText(message)
+      setCopiedLine(true)
+      toast.success('คัดลอกข้อความแจ้งช่างแล้ว นำไปวางใน LINE ได้ทันที')
+      setTimeout(() => setCopiedLine(false), 3000)
+    } catch {
+      toast.error('ไม่สามารถคัดลอกอัตโนมัติได้ กรุณาลองใหม่อีกครั้ง')
+    }
   }
 
   return (
@@ -143,15 +195,25 @@ function JobView({ job }: { job: RepairJob }) {
       {/* ==================== ฟอร์มพิมพ์: ใบช่างออกหน้างาน (FIELD) ==================== */}
       {printMode === 'FIELD' && (
         <div className="hidden print:block text-black" style={{ fontFamily: "'Sarabun', sans-serif" }}>
-          {/* หัวเอกสาร */}
+          {/* หัวเอกสารพร้อมโลโก้บริษัท */}
           <div className="flex items-start justify-between border-b-2 border-black pb-2">
-            <div>
-              <h1 className="text-[19px] font-bold leading-tight">{company.nameTh}</h1>
-              <p className="text-[11px] font-semibold text-gray-700">{company.nameEn}</p>
-              <p className="text-[11px] leading-snug">{company.address}</p>
-              <p className="text-[11px] font-semibold">โทร. {company.phones}</p>
+            <div className="flex items-start gap-3">
+              <img
+                src="/logo.png"
+                alt="โลโก้บริษัท หาดใหญ่ซาวด์สตาร์ จำกัด"
+                className="h-14 w-auto object-contain"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none'
+                }}
+              />
+              <div>
+                <h1 className="text-[19px] font-bold leading-tight">{company.nameTh}</h1>
+                <p className="text-[11px] font-semibold text-gray-700">{company.nameEn}</p>
+                <p className="text-[11px] leading-snug">{company.address}</p>
+                <p className="text-[11px] font-semibold">โทร. {company.phones}</p>
+              </div>
             </div>
-            <div className="text-right">
+            <div className="text-right shrink-0">
               <div className="inline-block border-2 border-black px-3 py-1 text-center">
                 <p className="text-[16px] font-bold leading-tight">ใบปฏิบัติงานซ่อมหน้างาน</p>
                 <p className="text-[10px] tracking-wider uppercase">FIELD SERVICE JOB SHEET</p>
@@ -206,12 +268,12 @@ function JobView({ job }: { job: RepairJob }) {
               <h2 className="border-b border-black pb-1 text-[13px] font-bold">2. ข้อมูลเครื่องซ่อมและอาการเสีย</h2>
               <div className="mt-1.5 space-y-1 text-[12px] leading-snug">
                 <p>
-                  <span className="font-semibold">ประเภทเครื่อง:</span> <span className="font-bold">{job.machineType}</span>
+                  <span className="font-semibold">ประเภทเครื่อง:</span> <span className="font-bold">{machineTypeLabel}</span>
                 </p>
                 <p>
                   <span className="font-semibold">ยี่ห้อ / รุ่น:</span>{' '}
-                  <span className="font-bold">{job.brand} {job.model}</span>
-                  {job.serialNo ? <span className="ml-2">· S/N: {job.serialNo}</span> : null}
+                  <span className="font-bold">{brandModelText}</span>
+                  {job.serialNo && job.serialNo !== '-' ? <span className="ml-2">· S/N: {job.serialNo}</span> : null}
                 </p>
                 <p>
                   <span className="font-semibold">อาการเสียที่แจ้ง:</span>{' '}
@@ -333,13 +395,23 @@ function JobView({ job }: { job: RepairJob }) {
       {printMode === 'COMPLETE' && (
         <div className="hidden print:block text-black" style={{ fontFamily: "'Sarabun', sans-serif" }}>
           <div className="flex items-start justify-between border-b-2 border-black pb-2">
-            <div>
-              <h1 className="text-[19px] font-bold leading-tight">{company.nameTh}</h1>
-              <p className="text-[11px] font-semibold text-gray-700">{company.nameEn}</p>
-              <p className="text-[11px] leading-snug">{company.address}</p>
-              <p className="text-[11px] font-semibold">โทร. {company.phones}</p>
+            <div className="flex items-start gap-3">
+              <img
+                src="/logo.png"
+                alt="โลโก้บริษัท หาดใหญ่ซาวด์สตาร์ จำกัด"
+                className="h-14 w-auto object-contain"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none'
+                }}
+              />
+              <div>
+                <h1 className="text-[19px] font-bold leading-tight">{company.nameTh}</h1>
+                <p className="text-[11px] font-semibold text-gray-700">{company.nameEn}</p>
+                <p className="text-[11px] leading-snug">{company.address}</p>
+                <p className="text-[11px] font-semibold">โทร. {company.phones}</p>
+              </div>
             </div>
-            <div className="text-right">
+            <div className="text-right shrink-0">
               <div className="inline-block border-2 border-black px-3 py-1 text-center">
                 <p className="text-[16px] font-bold leading-tight">ใบส่งคืนสินค้าและรับประกันซ่อม</p>
                 <p className="text-[10px] tracking-wider uppercase">COMPLETION &amp; DELIVERY RECEIPT</p>
@@ -357,8 +429,8 @@ function JobView({ job }: { job: RepairJob }) {
               <p><span className="font-semibold">ชื่อลูกค้า:</span> <span className="font-bold text-[14px]">{job.customerName}</span></p>
               <p><span className="font-semibold">เบอร์โทรศัพท์:</span> <span className="font-bold">{job.phone}</span></p>
               <p className="col-span-2"><span className="font-semibold">ที่อยู่:</span> {job.address}</p>
-              <p><span className="font-semibold">ประเภทเครื่อง:</span> {job.machineType}</p>
-              <p><span className="font-semibold">ยี่ห้อ / รุ่น:</span> {job.brand} {job.model} {job.serialNo ? `(S/N: ${job.serialNo})` : ''}</p>
+              <p><span className="font-semibold">ประเภทเครื่อง:</span> {machineTypeLabel}</p>
+              <p><span className="font-semibold">ยี่ห้อ / รุ่น:</span> {brandModelText} {job.serialNo && job.serialNo !== '-' ? `(S/N: ${job.serialNo})` : ''}</p>
               <p className="col-span-2"><span className="font-semibold">อาการเสียที่แจ้ง:</span> {job.symptom}</p>
             </div>
           </div>
@@ -470,6 +542,14 @@ function JobView({ job }: { job: RepairJob }) {
                 <PackageMinus /> เบิกอะไหล่
               </Button>
             )}
+            <Button
+              type="button"
+              onClick={handleCopyTechLine}
+              className="bg-[#06C755] text-white hover:bg-[#05b34c]"
+            >
+              {copiedLine ? <Check className="size-4 mr-1" /> : <Copy className="size-4 mr-1" />}
+              {copiedLine ? 'คัดลอกแล้ว!' : 'คัดลอกแจ้งช่างใน LINE'}
+            </Button>
             <Button variant="secondary" onClick={() => handlePrint('FIELD')}>
               <Wrench className="size-4 mr-1" /> พิมพ์ใบช่างออกหน้างาน
             </Button>
@@ -495,9 +575,9 @@ function JobView({ job }: { job: RepairJob }) {
                 <Item label="เบอร์โทรศัพท์" value={<a href={`tel:${job.phone}`} className="font-ticket text-primary hover:underline">{job.phone}</a>} />
                 <Item label="ผู้ติดต่อ" value={job.contactName} />
                 <Item label="ที่อยู่ / สถานที่ติดตั้ง" value={job.address} wide />
-                <Item label="ประเภทเครื่อง" value={job.machineType} />
-                <Item label="ยี่ห้อ / รุ่น" value={`${job.brand} ${job.model}`} />
-                <Item label="หมายเลขเครื่อง" value={job.serialNo ? <span className="font-ticket">{job.serialNo}</span> : undefined} />
+                <Item label="ประเภทเครื่อง" value={machineTypeLabel} />
+                <Item label="ยี่ห้อ / รุ่น" value={brandModelText} />
+                <Item label="หมายเลขเครื่อง" value={job.serialNo && job.serialNo !== '-' ? <span className="font-ticket">{job.serialNo}</span> : undefined} />
                 <Item label="วันที่นัดหมาย" value={job.appointmentAt ? <span className={cn(isOverdue(job) && 'font-semibold text-destructive')}>{fmtDateTime(job.appointmentAt)}{isOverdue(job) && ' (เกินนัด)'}</span> : undefined} />
                 <Item label="อาการเสีย" value={job.symptom} wide />
                 <Item label="รายละเอียดเพิ่มเติม" value={job.details} wide />
@@ -708,7 +788,7 @@ function EditCustomerDialog({
               address: String(f.get('address') || ''),
               machineType: String(f.get('machineType')),
               brand: String(f.get('brand')),
-              model: String(f.get('model')),
+              model: String(f.get('model') || ''),
               serialNo: String(f.get('serialNo') || ''),
               symptom: String(f.get('symptom')),
               details: String(f.get('details') || ''),
@@ -732,7 +812,7 @@ function EditCustomerDialog({
               <Input id="contactName" name="contactName" defaultValue={job.contactName || ''} />
             </Field>
             <Field label="ประเภทเครื่อง" htmlFor="machineType">
-              <Input id="machineType" name="machineType" defaultValue={job.machineType} required />
+              <Input id="machineType" name="machineType" defaultValue={job.applianceType || job.machineType} required />
             </Field>
           </div>
           <Field label="ที่อยู่ / สถานที่ติดตั้ง" htmlFor="address">
@@ -742,11 +822,11 @@ function EditCustomerDialog({
             <Field label="ยี่ห้อ" htmlFor="brand">
               <Input id="brand" name="brand" defaultValue={job.brand} required />
             </Field>
-            <Field label="รุ่น" htmlFor="model">
-              <Input id="model" name="model" defaultValue={job.model} required />
+            <Field label="รุ่น (ถ้ามี)" htmlFor="model">
+              <Input id="model" name="model" defaultValue={cleanModel(job.model)} />
             </Field>
             <Field label="Serial No." htmlFor="serialNo">
-              <Input id="serialNo" name="serialNo" defaultValue={job.serialNo || ''} />
+              <Input id="serialNo" name="serialNo" defaultValue={job.serialNo === '-' ? '' : (job.serialNo || '')} />
             </Field>
           </div>
           <Field label="อาการเสีย" htmlFor="symptom">
