@@ -1,6 +1,16 @@
 import * as React from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { CheckCircle2, Clock, Download, FileBarChart, HardDrive, PackageCheck, Printer, Wrench } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  Download,
+  FileBarChart,
+  HardDrive,
+  PackageCheck,
+  Printer,
+  Wrench,
+} from 'lucide-react'
 
 import { EmptyState, Field, JobNo, PageHeader, RoleGate, StatusBadge } from '@/components/app/shell'
 import { Button } from '@/components/ui/button'
@@ -23,7 +33,7 @@ type Kind = 'period' | 'open' | 'done' | 'stock'
 
 function downloadCsv(name: string, rows: (string | number)[][]) {
   const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
-  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }))
+  const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }))
   const a = Object.assign(document.createElement('a'), { href: url, download: name })
   a.click()
   URL.revokeObjectURL(url)
@@ -50,7 +60,7 @@ function Reports() {
   )
   const txRows = transactions.filter((t) => inRange(t.at))
 
-  // 🟢 คำนวณสรุปภาพรวม (ขั้นที่ 1)
+  // สรุปตัวเลขภาพรวม
   const summary = React.useMemo(() => {
     const periodJobs = jobs.filter((j) => inRange(j.receivedAt))
     const total = periodJobs.length
@@ -61,27 +71,57 @@ function Reports() {
     return { total, completed, inProgress, pending }
   }, [jobs, from, to])
 
-  // 🟢 คำนวณสถิติยี่ห้อสินค้า + อะไหล่เบิกใช้ (ขั้นที่ 4 - แก้ไข Syntax Error วงเล็บแล้ว)
+  // สถิติเชิงลึก: ยี่ห้อ/รุ่นยอดฮิต, อะไหล่เบิกใช้บ่อย, อาการเสียยอดฮิต
   const extraStats = React.useMemo(() => {
     const periodJobs = jobs.filter((j) => inRange(j.receivedAt))
 
-    // นับสถิติยี่ห้อสินค้าที่ซ่อมบ่อย
-    const brandCounts: Record<string, number> = {}
+    // 1. ยี่ห้อ / รุ่นที่ซ่อมบ่อย 5 อันดับ
+    const modelCounts: Record<string, number> = {}
     periodJobs.forEach((j) => {
-      const b = j.brand?.trim() || 'ไม่ระบุ'
-      brandCounts[b] = (brandCounts[b] || 0) + 1
+      const brand = j.brand?.trim() || 'ไม่ระบุยี่ห้อ'
+      const model = j.model && j.model.trim() !== '-' ? ` ${j.model.trim()}` : ''
+      const type = j.applianceType?.trim() ? ` (${j.applianceType.trim()})` : ''
+      const label = `${brand}${model}${type}`
+      modelCounts[label] = (modelCounts[label] || 0) + 1
     })
-    const topBrands = Object.entries(brandCounts)
+    const topModels = Object.entries(modelCounts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
 
-    // สรุปยอดเบิกอะไหล่ออก (แก้ไขวงเล็บ .filter((t) => t.type === 'ISSUE') เรียบร้อย)
-    const totalIssuedParts = txRows
-      .filter((t) => t.type === 'OUT')
-      .reduce((sum, t) => sum + t.qty, 0)
+    // 2. อะไหล่ที่ถูกเบิกใช้บ่อย 5 อันดับ
+    const outTxs = txRows.filter((t) => t.type === 'OUT')
+    const totalIssuedParts = outTxs.reduce((sum, t) => sum + t.qty, 0)
+    const partCounts: Record<string, { code: string; name: string; unit: string; qty: number }> = {}
+    outTxs.forEach((t) => {
+      const item = inventory.find((x) => x.id === t.partId)
+      const key = t.partId
+      if (!partCounts[key]) {
+        partCounts[key] = {
+          code: item?.code || '-',
+          name: item?.name || 'อะไหล่ไม่ระบุชื่อ',
+          unit: item?.unit || 'ชิ้น',
+          qty: 0,
+        }
+      }
+      partCounts[key].qty += t.qty
+    })
+    const topParts = Object.values(partCounts)
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, 5)
 
-    return { topBrands, totalIssuedParts }
-  }, [jobs, txRows, from, to])
+    // 3. อาการเสียยอดฮิต 5 อันดับ
+    const symptomCounts: Record<string, number> = {}
+    periodJobs.forEach((j) => {
+      const s = j.symptom?.trim()
+      if (!s) return
+      symptomCounts[s] = (symptomCounts[s] || 0) + 1
+    })
+    const topSymptoms = Object.entries(symptomCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+
+    return { topModels, topParts, totalIssuedParts, topSymptoms }
+  }, [jobs, txRows, inventory, from, to])
 
   function exportCsv() {
     if (kind === 'stock') {
@@ -113,8 +153,8 @@ function Reports() {
         }
       />
 
-      {/* 🟢 การ์ดสรุปตัวเลขภาพรวม */}
-      <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* การ์ดสรุปตัวเลขภาพรวม */}
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-muted-foreground">งานซ่อมทั้งหมด</span>
@@ -256,18 +296,23 @@ function Reports() {
         </div>
       )}
 
-      {/* 🟢 สถิติยี่ห้อและสรุปอะไหล่ด้านล่างสุด */}
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* สถิติเชิงลึกด้านล่างสุด: ยี่ห้อ/รุ่นยอดฮิต + อะไหล่เบิกบ่อย + อาการเสียยอดฮิต */}
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="rounded-2xl border border-border bg-card p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-            <Wrench className="h-4 w-4 text-primary" /> ยี่ห้อที่รับซ่อมบ่อยที่สุด 5 อันดับ
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Wrench className="h-4 w-4 text-primary" /> Top 5 ยี่ห้อ / รุ่นที่ซ่อมบ่อย
           </h3>
           <div className="space-y-2">
-            {extraStats.topBrands.length > 0 ? (
-              extraStats.topBrands.map(([brand, count]) => (
-                <div key={brand} className="flex justify-between items-center text-sm border-b border-border/50 pb-1.5">
-                  <span className="font-medium">{brand}</span>
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-secondary text-secondary-foreground font-semibold">{count} ใบงาน</span>
+            {extraStats.topModels.length > 0 ? (
+              extraStats.topModels.map(([label, count], idx) => (
+                <div key={label} className="flex items-center justify-between gap-2 border-b border-border/50 pb-1.5 text-xs last:border-b-0">
+                  <span className="truncate font-medium">
+                    <span className="mr-1.5 font-ticket text-muted-foreground">#{idx + 1}</span>
+                    {label}
+                  </span>
+                  <span className="shrink-0 rounded-full bg-secondary px-2.5 py-0.5 font-semibold text-secondary-foreground">
+                    {count} งาน
+                  </span>
                 </div>
               ))
             ) : (
@@ -276,16 +321,57 @@ function Reports() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card p-5 flex flex-col justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-              <PackageCheck className="h-4 w-4 text-primary" /> การเบิกใช้อะไหล่รวม
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <PackageCheck className="h-4 w-4 text-primary" /> Top 5 อะไหล่ที่เบิกใช้บ่อย
             </h3>
-            <p className="text-xs text-muted-foreground">จำนวนอะไหล่ทั้งหมดที่ถูกเบิกใช้งานตามช่วงเวลาที่เลือก</p>
+            <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-bold text-primary">
+              รวม {extraStats.totalIssuedParts} ชิ้น
+            </span>
           </div>
-          <div className="mt-4 flex items-baseline gap-2">
-            <span className="text-4xl font-bold text-primary">{extraStats.totalIssuedParts}</span>
-            <span className="text-sm text-muted-foreground font-medium">ชิ้น</span>
+          <div className="space-y-2">
+            {extraStats.topParts.length > 0 ? (
+              extraStats.topParts.map((part, idx) => (
+                <div key={`${part.code}-${idx}`} className="flex items-center justify-between gap-2 border-b border-border/50 pb-1.5 text-xs last:border-b-0">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">
+                      <span className="mr-1.5 font-ticket text-muted-foreground">#{idx + 1}</span>
+                      {part.name}
+                    </p>
+                    <p className="font-ticket text-[10px] text-muted-foreground">{part.code}</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 font-ticket font-bold text-amber-900">
+                    {part.qty} {part.unit}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-muted-foreground">ยังไม่มีรายการเบิกอะไหล่ในช่วงเวลานี้</p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+            <AlertCircle className="h-4 w-4 text-primary" /> Top 5 อาการเสียยอดฮิต
+          </h3>
+          <div className="space-y-2">
+            {extraStats.topSymptoms.length > 0 ? (
+              extraStats.topSymptoms.map(([symptom, count], idx) => (
+                <div key={symptom} className="flex items-center justify-between gap-2 border-b border-border/50 pb-1.5 text-xs last:border-b-0">
+                  <span className="truncate font-medium">
+                    <span className="mr-1.5 font-ticket text-muted-foreground">#{idx + 1}</span>
+                    {symptom}
+                  </span>
+                  <span className="shrink-0 rounded-full bg-secondary px-2.5 py-0.5 font-semibold text-secondary-foreground">
+                    {count} งาน
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-muted-foreground">ไม่มีข้อมูลสถิติ</p>
+            )}
           </div>
         </div>
       </div>
