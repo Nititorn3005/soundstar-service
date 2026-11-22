@@ -314,8 +314,14 @@ export const changeRepairJobStatus = createServerFn({ method: "POST" })
       if (!job) return fail("ไม่พบใบงาน");
       if (profile.role === "TECH" && job.technicianId !== profile.id)
         return fail("เปลี่ยนสถานะได้เฉพาะงานที่ได้รับมอบหมาย");
-      if (!allowedNextStatuses(job.status, profile.role).includes(data.to))
+
+      const isNoteOnlyLog = data.to === job.status && Boolean(data.note?.trim());
+      if (
+        !isNoteOnlyLog &&
+        !allowedNextStatuses(job.status, profile.role).includes(data.to)
+      ) {
         return fail("ไม่สามารถเปลี่ยนเป็นสถานะนี้ได้");
+      }
 
       const admin = supabaseAdmin();
       const { data: currentJob } = await admin
@@ -328,6 +334,7 @@ export const changeRepairJobStatus = createServerFn({ method: "POST" })
         ? currentJob.history
         : [];
       const now = new Date().toISOString();
+      const trimmedNote = data.note ? data.note.trim() : null;
 
       const newHistoryItem = {
         id: crypto.randomUUID(),
@@ -335,7 +342,7 @@ export const changeRepairJobStatus = createServerFn({ method: "POST" })
         to: data.to,
         at: now,
         by: profile.id,
-        note: data.note ? data.note.trim() : null,
+        note: trimmedNote,
       };
 
       const { error } = await admin
@@ -347,9 +354,22 @@ export const changeRepairJobStatus = createServerFn({ method: "POST" })
         })
         .eq("id", data.id);
 
-      return error
-        ? fail(error.message || dbError)
-        : { ok: true, value: undefined };
+      if (error) return fail(error.message || dbError);
+
+      await admin
+        .from("repair_job_history")
+        .insert({
+          job_id: data.id,
+          from_status: job.status,
+          to_status: data.to,
+          changed_by: profile.id,
+          note: trimmedNote,
+          created_at: now,
+        })
+        .then(() => {})
+        .catch(() => {});
+
+      return { ok: true, value: undefined };
     } catch (error) {
       return fail(error instanceof Error ? error.message : dbError);
     }
