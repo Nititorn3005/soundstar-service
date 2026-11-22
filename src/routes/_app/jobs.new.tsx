@@ -38,6 +38,7 @@ const MAX_PHOTOS = 6
 const MAX_BYTES = 5 * 1024 * 1024
 const ACCEPT = ['image/jpeg', 'image/png', 'image/webp', 'image/heic']
 const WARRANTY_DAYS = 30
+const UNKNOWN_VALUE = '__UNKNOWN__'
 
 interface ThaiAddressEntry {
   district: string // ตำบล/แขวง
@@ -186,14 +187,14 @@ function NewJob() {
 
   // รายชื่ออำเภอตามจังหวัดที่เลือก
   const amphoes = React.useMemo(() => {
-    if (!province) return []
+    if (!province || province === UNKNOWN_VALUE) return []
     const set = new Set(thaiDb.filter((d) => d.province === province).map((d) => d.amphoe))
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'th'))
   }, [thaiDb, province])
 
   // รายชื่อตำบลตามจังหวัดและอำเภอที่เลือก
   const districts = React.useMemo(() => {
-    if (!province || !amphoe) return []
+    if (!province || province === UNKNOWN_VALUE || !amphoe || amphoe === UNKNOWN_VALUE) return []
     return thaiDb
       .filter((d) => d.province === province && d.amphoe === amphoe)
       .sort((a, b) => a.district.localeCompare(b.district, 'th'))
@@ -202,6 +203,10 @@ function NewJob() {
   // อัปเดตรหัสไปรษณีย์อัตโนมัติเมื่อเลือกตำบล
   const handleDistrictChange = (selectedDistrict: string) => {
     setDistrict(selectedDistrict)
+    if (!selectedDistrict || selectedDistrict === UNKNOWN_VALUE) {
+      setZipcode('')
+      return
+    }
     const found = districts.find((d) => d.district === selectedDistrict)
     if (found) {
       setZipcode(String(found.zipcode))
@@ -290,13 +295,15 @@ function NewJob() {
       pastJobs: entry.pastJobs,
     })
 
-    // พยายามแยกที่อยู่เก่ากลับเข้าช่องรายละเอียด + จังหวัด/อำเภอ/ตำบล
     let rawAddr = j.address || ''
     const zipMatch = rawAddr.match(/\b(\d{5})\b/)
     if (zipMatch) {
       setZipcode(zipMatch[1])
       rawAddr = rawAddr.replace(zipMatch[0], '').trim()
+    } else {
+      setZipcode('')
     }
+
     const provMatch = rawAddr.match(/(?:จ\.|จังหวัด)\s*([^\s]+)/)
     if (provMatch) {
       setProvince(provMatch[1])
@@ -304,17 +311,26 @@ function NewJob() {
     } else if (rawAddr.includes('กรุงเทพมหานคร')) {
       setProvince('กรุงเทพมหานคร')
       rawAddr = rawAddr.replace('กรุงเทพมหานคร', '').trim()
+    } else {
+      setProvince(UNKNOWN_VALUE)
     }
+
     const ampMatch = rawAddr.match(/(?:อ\.|อำเภอ|เขต)\s*([^\s]+)/)
     if (ampMatch) {
       setAmphoe(ampMatch[1])
       rawAddr = rawAddr.replace(ampMatch[0], '').trim()
+    } else {
+      setAmphoe(UNKNOWN_VALUE)
     }
+
     const distMatch = rawAddr.match(/(?:ต\.|ตำบล|แขวง)\s*([^\s]+)/)
     if (distMatch) {
       setDistrict(distMatch[1])
       rawAddr = rawAddr.replace(distMatch[0], '').trim()
+    } else {
+      setDistrict(UNKNOWN_VALUE)
     }
+
     setAddressDetail(rawAddr.trim())
     toast.success(`ดึงข้อมูลลูกค้า "${j.customerName}" เรียบร้อย`)
   }
@@ -337,7 +353,7 @@ function NewJob() {
     toast.success(`เพิ่มข้อมูลเครื่อง ${pastJob.brand} ${pastJob.model || ''} ลงฟอร์มแล้ว`)
   }
 
-  // กดปุ่มรับสิทธิ์เคลมประกัน 30 วัน (ดึงข้อมูลลูกค้า + เครื่องซ่อม + ติดป้ายในหมายเหตุอัตโนมัติ)
+  // กดปุ่มรับสิทธิ์เคลมประกัน 30 วัน
   const applyWarrantyClaim = (match: WarrantyMatch) => {
     const pastJob = match.job
     const customerJobs = jobs.filter((x) => x.phone.replace(/[-\s]/g, '') === pastJob.phone.replace(/[-\s]/g, ''))
@@ -411,25 +427,29 @@ function NewJob() {
     if (!customerName.trim()) e.customerName = 'กรุณากรอกชื่อลูกค้า'
     if (!/^0\d{8,9}$/.test(phone.replace(/[-\s]/g, ''))) e.phone = 'เบอร์โทรไม่ถูกต้อง'
 
-    const isBkk = province === 'กรุงเทพมหานคร'
+    const validProvince = province && province !== UNKNOWN_VALUE ? province : ''
+    const validAmphoe = amphoe && amphoe !== UNKNOWN_VALUE ? amphoe : ''
+    const validDistrict = district && district !== UNKNOWN_VALUE ? district : ''
+
+    const isBkk = validProvince === 'กรุงเทพมหานคร'
     const subdistrictPrefix = isBkk ? 'แขวง' : 'ต.'
     const districtPrefix = isBkk ? 'เขต' : 'อ.'
     const provincePrefix = isBkk ? '' : 'จ.'
 
     const fullAddress = [
       addressDetail.trim(),
-      district ? `${subdistrictPrefix}${district}` : '',
-      amphoe ? `${districtPrefix}${amphoe}` : '',
-      province ? `${provincePrefix}${province}` : '',
+      validDistrict ? `${subdistrictPrefix}${validDistrict}` : '',
+      validAmphoe ? `${districtPrefix}${validAmphoe}` : '',
+      validProvince ? `${provincePrefix}${validProvince}` : '',
       zipcode.trim(),
     ]
       .filter(Boolean)
       .join(' ')
 
-    if (!addressDetail.trim() && !province) {
-      e.address = 'กรุณากรอกที่อยู่และเลือกจังหวัด/อำเภอ/ตำบล'
+    if (!addressDetail.trim() && !validProvince) {
+      e.address = 'กรุณากรอกที่อยู่หรือสถานที่ติดตั้ง'
     } else if (thaiDb.length > 0 && (!province || !amphoe || !district)) {
-      e.address = 'กรุณาเลือกจังหวัด อำเภอ และตำบลให้ครบถ้วน'
+      e.address = 'กรุณาเลือกจังหวัด อำเภอ และตำบล (หรือเลือก "ไม่ทราบข้อมูล / ข้าม")'
     }
 
     let hasItemError = false
@@ -751,7 +771,7 @@ function NewJob() {
                 />
               </Field>
 
-              {/* ที่อยู่แบบเลือก จังหวัด / อำเภอ / ตำบล */}
+              {/* ที่อยู่แบบเลือก จังหวัด / อำเภอ / ตำบล (รองรับ "ไม่ทราบข้อมูล / ข้าม") */}
               <Field label="บ้านเลขที่ / ซอย / ถนน / ชื่อสถานที่" htmlFor="addressDetail" error={errors.address} required className="sm:col-span-2">
                 <Textarea
                   id="addressDetail"
@@ -769,13 +789,20 @@ function NewJob() {
                   value={province}
                   disabled={loadingThaiDb}
                   onChange={(e) => {
-                    setProvince(e.target.value)
-                    setAmphoe('')
-                    setDistrict('')
+                    const val = e.target.value
+                    setProvince(val)
+                    if (val === UNKNOWN_VALUE) {
+                      setAmphoe(UNKNOWN_VALUE)
+                      setDistrict(UNKNOWN_VALUE)
+                    } else {
+                      setAmphoe('')
+                      setDistrict('')
+                    }
                     setZipcode('')
                   }}
                 >
                   <option value="">{loadingThaiDb ? 'กำลังโหลดข้อมูลจังหวัด...' : '— เลือกจังหวัด —'}</option>
+                  <option value={UNKNOWN_VALUE}>— ไม่ทราบข้อมูล / ข้าม —</option>
                   {provinces.map((p) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
@@ -789,12 +816,18 @@ function NewJob() {
                   value={amphoe}
                   disabled={!province || loadingThaiDb}
                   onChange={(e) => {
-                    setAmphoe(e.target.value)
-                    setDistrict('')
+                    const val = e.target.value
+                    setAmphoe(val)
+                    if (val === UNKNOWN_VALUE) {
+                      setDistrict(UNKNOWN_VALUE)
+                    } else {
+                      setDistrict('')
+                    }
                     setZipcode('')
                   }}
                 >
                   <option value="">— เลือกอำเภอ / เขต —</option>
+                  <option value={UNKNOWN_VALUE}>— ไม่ทราบข้อมูล / ข้าม —</option>
                   {amphoes.map((a) => (
                     <option key={a} value={a}>{a}</option>
                   ))}
@@ -810,6 +843,7 @@ function NewJob() {
                   onChange={(e) => handleDistrictChange(e.target.value)}
                 >
                   <option value="">— เลือกตำบล / แขวง —</option>
+                  <option value={UNKNOWN_VALUE}>— ไม่ทราบข้อมูล / ข้าม —</option>
                   {districts.map((d, idx) => (
                     <option key={`${d.district}-${idx}`} value={d.district}>
                       {d.district}
@@ -822,7 +856,7 @@ function NewJob() {
                 <Input
                   id="zipcode"
                   className="h-11 font-ticket"
-                  placeholder="รหัสไปรษณีย์"
+                  placeholder="รหัสไปรษณีย์ (ถ้าทราบ)"
                   value={zipcode}
                   onChange={(e) => setZipcode(e.target.value)}
                 />
