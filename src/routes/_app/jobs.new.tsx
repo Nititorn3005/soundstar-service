@@ -1,6 +1,21 @@
 import * as React from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { ArrowRight, Camera, Check, CheckCircle2, Copy, History, Loader2, Plus, Save, Trash2, UserCheck, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowRight,
+  Camera,
+  Check,
+  CheckCircle2,
+  Copy,
+  History,
+  Loader2,
+  Plus,
+  Save,
+  ShieldCheck,
+  Trash2,
+  UserCheck,
+  X,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Field, PageHeader, Panel, RoleGate } from '@/components/app/shell'
@@ -22,6 +37,7 @@ export const Route = createFileRoute('/_app/jobs/new')({
 const MAX_PHOTOS = 6
 const MAX_BYTES = 5 * 1024 * 1024
 const ACCEPT = ['image/jpeg', 'image/png', 'image/webp', 'image/heic']
+const WARRANTY_DAYS = 30
 
 interface ThaiAddressEntry {
   district: string // ตำบล/แขวง
@@ -40,7 +56,38 @@ interface JobItemState {
   details?: string
 }
 
+interface WarrantyMatch {
+  job: RepairJob
+  completedAt: string
+  daysSince: number
+  daysRemaining: number
+  matchedBy: 'เบอร์โทร' | 'Serial No.' | 'เบอร์โทรและ Serial No.'
+}
+
 type Errors = Partial<Record<'customerName' | 'phone' | 'address' | 'items' | 'photos', string>>
+
+function getCompletedTimestamp(job: RepairJob): string | null {
+  if (job.status !== 'COMPLETED') return null
+  if (Array.isArray(job.history)) {
+    const completedEntry = [...job.history].reverse().find((h) => h.to === 'COMPLETED')
+    if (completedEntry?.at) return completedEntry.at
+  }
+  return (job as RepairJob & { updatedAt?: string }).updatedAt || job.receivedAt
+}
+
+function checkWarranty30Days(job: RepairJob): { completedAt: string; daysSince: number; daysRemaining: number } | null {
+  const completedAt = getCompletedTimestamp(job)
+  if (!completedAt) return null
+  const completedMs = new Date(completedAt).getTime()
+  if (Number.isNaN(completedMs)) return null
+  const diffDays = Math.floor((Date.now() - completedMs) / (1000 * 60 * 60 * 24))
+  if (diffDays < 0 || diffDays > WARRANTY_DAYS) return null
+  return {
+    completedAt,
+    daysSince: diffDays,
+    daysRemaining: Math.max(0, WARRANTY_DAYS - diffDays),
+  }
+}
 
 function buildTechLineMessage(params: {
   job: RepairJob
@@ -49,7 +96,7 @@ function buildTechLineMessage(params: {
   note?: string
 }): string {
   const { job, items, techName, note } = params
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://soundstar-service.netlify.app'
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://soundstar-service-01.netlify.app'
   const jobUrl = `${origin}/jobs/${job.id}`
   const urgencyText = URGENCY_LABEL[job.urgency] || 'ปกติ'
   const apptText = job.appointmentAt ? fmtDateTime(job.appointmentAt) : 'ตามสะดวก / นัดเพิ่ม'
@@ -97,6 +144,7 @@ function NewJob() {
   const [customerName, setCustomerName] = React.useState('')
   const [phone, setPhone] = React.useState('')
   const [contactName, setContactName] = React.useState('')
+  const [note, setNote] = React.useState('')
   const [selectedHistoryCustomer, setSelectedHistoryCustomer] = React.useState<{
     customerName: string
     phone: string
@@ -161,6 +209,44 @@ function NewJob() {
       setZipcode('')
     }
   }
+
+  // รายการเครื่องแจ้งซ่อม (เริ่มต้น 1 เครื่อง)
+  const [items, setItems] = React.useState<JobItemState[]>([
+    { applianceType: MACHINE_TYPES[0] || 'เครื่องซักฝาบน', brand: '', model: '', symptom: '' },
+  ])
+
+  // ตรวจจับประกันซ่อมซ้ำ 30 วันอัตโนมัติ (เช็กทั้งเบอร์โทรและ Serial No.)
+  const warrantyMatches = React.useMemo<WarrantyMatch[]>(() => {
+    const cleanPhone = phone.replace(/[-\s]/g, '')
+    const serialNeedles = items
+      .map((i) => (i.serialNumber || '').trim().toLowerCase())
+      .filter((sn) => sn.length >= 4)
+
+    if (cleanPhone.length < 9 && serialNeedles.length === 0) return []
+
+    const results: WarrantyMatch[] = []
+    for (const j of jobs) {
+      const warrantyInfo = checkWarranty30Days(j)
+      if (!warrantyInfo) continue
+
+      const jPhone = j.phone.replace(/[-\s]/g, '')
+      const jSn = (j.serialNo || '').trim().toLowerCase()
+
+      const phoneMatched = cleanPhone.length >= 9 && jPhone === cleanPhone
+      const snMatched = Boolean(jSn && jSn !== '-' && serialNeedles.some((sn) => jSn === sn || jSn.includes(sn)))
+
+      if (!phoneMatched && !snMatched) continue
+
+      results.push({
+        job: j,
+        completedAt: warrantyInfo.completedAt,
+        daysSince: warrantyInfo.daysSince,
+        daysRemaining: warrantyInfo.daysRemaining,
+        matchedBy: phoneMatched && snMatched ? 'เบอร์โทรและ Serial No.' : snMatched ? 'Serial No.' : 'เบอร์โทร',
+      })
+    }
+    return results.sort((a, b) => a.daysSince - b.daysSince)
+  }, [jobs, phone, items])
 
   // ค้นหาประวัติลูกค้าเดิมจากชื่อหรือเบอร์โทรที่กำลังพิมพ์
   const matchingCustomers = React.useMemo(() => {
@@ -239,7 +325,7 @@ function NewJob() {
       applianceType: pastJob.applianceType || MACHINE_TYPES[0] || 'เครื่องซักฝาบน',
       brand: pastJob.brand || '',
       model: pastJob.model && pastJob.model !== '-' ? pastJob.model : '',
-      serialNumber: pastJob.serialNo || '',
+      serialNumber: pastJob.serialNo && pastJob.serialNo !== '-' ? pastJob.serialNo : '',
       symptom: '',
     }
     setItems((prev) => {
@@ -251,15 +337,25 @@ function NewJob() {
     toast.success(`เพิ่มข้อมูลเครื่อง ${pastJob.brand} ${pastJob.model || ''} ลงฟอร์มแล้ว`)
   }
 
-  // รายการเครื่องแจ้งซ่อม (เริ่มต้น 1 เครื่อง)
-  const [items, setItems] = React.useState<JobItemState[]>([
-    { applianceType: MACHINE_TYPES[0] || 'เครื่องซักฝาบน', brand: '', model: '', symptom: '' },
-  ])
+  // กดปุ่มรับสิทธิ์เคลมประกัน 30 วัน (ดึงข้อมูลลูกค้า + เครื่องซ่อม + ติดป้ายในหมายเหตุอัตโนมัติ)
+  const applyWarrantyClaim = (match: WarrantyMatch) => {
+    const pastJob = match.job
+    const customerJobs = jobs.filter((x) => x.phone.replace(/[-\s]/g, '') === pastJob.phone.replace(/[-\s]/g, ''))
+    applyCustomerHistory({
+      customerName: pastJob.customerName,
+      phone: pastJob.phone,
+      latestJob: pastJob,
+      pastJobs: customerJobs.length > 0 ? customerJobs : [pastJob],
+    })
+    applyMachineFromHistory(pastJob)
+    const claimTag = `[งานเคลมประกัน 30 วัน อ้างอิงใบงาน ${pastJob.jobNo} (ซ่อมเสร็จเมื่อ ${fmtDateTime(match.completedAt)})]`
+    setNote((prev) => (prev.includes(pastJob.jobNo) ? prev : prev ? `${claimTag}\n${prev}` : claimTag))
+    toast.success(`ติดป้ายงานเคลมประกันจากใบงาน ${pastJob.jobNo} เรียบร้อย`)
+  }
 
   const techs = profiles.filter((p) => p.role === 'TECH')
   const isAdmin = currentUser?.role === 'ADMIN'
 
-  // ฟังก์ชันเพิ่มเครื่องซ่อม
   const handleAddItem = () => {
     setItems((prev) => [
       ...prev,
@@ -267,7 +363,6 @@ function NewJob() {
     ])
   }
 
-  // ฟังก์ชันลบเครื่องซ่อม
   const handleRemoveItem = (index: number) => {
     if (items.length === 1) {
       toast.error('ต้องมีรายการเครื่องแจ้งซ่อมอย่างน้อย 1 รายการ')
@@ -276,7 +371,6 @@ function NewJob() {
     setItems((prev) => prev.filter((_, i) => i !== index))
   }
 
-  // ฟังก์ชันอัปเดตข้อมูลเครื่องตาม Index
   const handleItemChange = (index: number, field: keyof JobItemState, value: string) => {
     setItems((prev) =>
       prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)),
@@ -317,7 +411,6 @@ function NewJob() {
     if (!customerName.trim()) e.customerName = 'กรุณากรอกชื่อลูกค้า'
     if (!/^0\d{8,9}$/.test(phone.replace(/[-\s]/g, ''))) e.phone = 'เบอร์โทรไม่ถูกต้อง'
 
-    // ประกอบที่อยู่ฉบับเต็มจากช่องกรอก + จังหวัด/อำเภอ/ตำบล
     const isBkk = province === 'กรุงเทพมหานคร'
     const subdistrictPrefix = isBkk ? 'แขวง' : 'ต.'
     const districtPrefix = isBkk ? 'เขต' : 'อ.'
@@ -339,7 +432,6 @@ function NewJob() {
       e.address = 'กรุณาเลือกจังหวัด อำเภอ และตำบลให้ครบถ้วน'
     }
 
-    // ตรวจสอบความถูกต้องของรายการเครื่องซ่อมทุกชิ้น (ไม่บังคับกรอกรุ่นแล้ว)
     let hasItemError = false
     items.forEach((item) => {
       if (!item.brand.trim() || !item.symptom.trim()) {
@@ -357,7 +449,7 @@ function NewJob() {
     }
 
     const assignedTechId = (isAdmin && v('technicianId')) || undefined
-    const noteText = v('note') || undefined
+    const noteText = note.trim() || undefined
 
     setPending(true)
     const res = await createJob({
@@ -468,6 +560,62 @@ function NewJob() {
         </div>
       )}
 
+      {/* แถบเตือนประกันซ่อมซ้ำ 30 วันอัตโนมัติ (Warranty Claim Alert) */}
+      {warrantyMatches.length > 0 && (
+        <div
+          role="alert"
+          className="mb-6 rounded-2xl border-2 border-amber-400 bg-amber-50 p-4 shadow-xs"
+        >
+          <div className="flex items-start gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-200 text-amber-900">
+              <AlertTriangle className="size-5" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-sm font-bold text-amber-950">
+                ⚠️ แจ้งเตือน: พบประวัติซ่อมเสร็จภายใน 30 วัน (อยู่ระหว่างรับประกันงานซ่อมเดิม)
+              </h2>
+              <p className="mt-0.5 text-xs text-amber-900">
+                ตรวจพบจาก <strong>{warrantyMatches[0].matchedBy}</strong> — กรุณาตรวจสอบว่าอาการเสียและอะไหล่ตรงกับงานเดิมหรือไม่
+              </p>
+
+              <div className="mt-3 grid gap-2">
+                {warrantyMatches.map((m) => (
+                  <div
+                    key={m.job.id}
+                    className="flex flex-col justify-between gap-2 rounded-xl border border-amber-300 bg-white p-3 text-xs sm:flex-row sm:items-center"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-ticket text-sm font-bold text-primary">{m.job.jobNo}</span>
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900">
+                          ซ่อมเสร็จเมื่อ {m.daysSince === 0 ? 'วันนี้' : `${m.daysSince} วันที่แล้ว`} · เหลือประกัน {m.daysRemaining} วัน
+                        </span>
+                      </div>
+                      <p className="font-medium text-foreground">
+                        ลูกค้า: {m.job.customerName} ({m.job.phone}) · เครื่อง: {m.job.applianceType} {m.job.brand} {m.job.model && m.job.model !== '-' ? m.job.model : ''}
+                        {m.job.serialNo && m.job.serialNo !== '-' ? ` (S/N: ${m.job.serialNo})` : ''}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        อาการเดิม: <strong>{m.job.symptom}</strong>
+                        {m.job.resolution ? ` · วิธีแก้ไขเดิม: ${m.job.resolution}` : ''}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="shrink-0 bg-amber-600 text-white hover:bg-amber-700"
+                      onClick={() => applyWarrantyClaim(m)}
+                    >
+                      <ShieldCheck className="mr-1 size-4" /> ติดป้ายงานเคลมประกัน
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={onSubmit} noValidate className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         <div className="grid gap-6">
           {/* ข้อมูลลูกค้า */}
@@ -554,33 +702,41 @@ function NewJob() {
                     </button>
                   </div>
                   <div className="grid gap-1.5">
-                    {selectedHistoryCustomer.pastJobs.slice(0, 5).map((pj) => (
-                      <div
-                        key={pj.id}
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200/80 bg-white px-2.5 py-1.5"
-                      >
-                        <div>
-                          <span className="font-ticket font-bold text-primary">{pj.jobNo}</span>{' '}
-                          <span className="font-medium">
-                            {pj.applianceType} {pj.brand} {pj.model && pj.model !== '-' ? pj.model : ''}
-                          </span>
-                          {pj.serialNo ? <span className="font-ticket text-muted-foreground"> (S/N: {pj.serialNo})</span> : null}
-                          <p className="text-[11px] text-muted-foreground">
-                            วันที่ {fmtDateTime(pj.receivedAt)} · อาการ: {pj.symptom}
-                            {pj.resolution ? ` · ผล: ${pj.resolution}` : ''}
-                          </p>
-                        </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-[11px]"
-                          onClick={() => applyMachineFromHistory(pj)}
+                    {selectedHistoryCustomer.pastJobs.slice(0, 5).map((pj) => {
+                      const w = checkWarranty30Days(pj)
+                      return (
+                        <div
+                          key={pj.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200/80 bg-white px-2.5 py-1.5"
                         >
-                          + ดึงเครื่องนี้เข้าใบงาน
-                        </Button>
-                      </div>
-                    ))}
+                          <div>
+                            <span className="font-ticket font-bold text-primary">{pj.jobNo}</span>{' '}
+                            <span className="font-medium">
+                              {pj.applianceType} {pj.brand} {pj.model && pj.model !== '-' ? pj.model : ''}
+                            </span>
+                            {pj.serialNo && pj.serialNo !== '-' ? <span className="font-ticket text-muted-foreground"> (S/N: {pj.serialNo})</span> : null}
+                            {w && (
+                              <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900">
+                                ประกัน 30 วัน (เหลือ {w.daysRemaining} วัน)
+                              </span>
+                            )}
+                            <p className="text-[11px] text-muted-foreground">
+                              วันที่ {fmtDateTime(pj.receivedAt)} · อาการ: {pj.symptom}
+                              {pj.resolution ? ` · ผล: ${pj.resolution}` : ''}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[11px]"
+                            onClick={() => applyMachineFromHistory(pj)}
+                          >
+                            + ดึงเครื่องนี้เข้าใบงาน
+                          </Button>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}
@@ -744,7 +900,7 @@ function NewJob() {
                         />
                       </Field>
 
-                      <Field label="หมายเลขเครื่อง" htmlFor={`serial-${index}`} hint="ถ้ามี (ระบบค้นหาประวัติ S/N อัตโนมัติ)">
+                      <Field label="หมายเลขเครื่อง" htmlFor={`serial-${index}`} hint="ถ้ามี (ระบบเช็กประกัน 30 วันอัตโนมัติ)">
                         <Input
                           id={`serial-${index}`}
                           className="h-11 font-ticket"
@@ -760,13 +916,21 @@ function NewJob() {
                             พบประวัติการซ่อมของ Serial No. นี้ ({snHistory.length} ครั้ง)
                           </p>
                           <ul className="space-y-1 text-[11px] text-amber-950">
-                            {snHistory.slice(0, 3).map((h) => (
-                              <li key={h.id}>
-                                • <span className="font-ticket font-bold">{h.jobNo}</span> ({fmtDateTime(h.receivedAt)}) — อาการ:{' '}
-                                <strong>{h.symptom}</strong>
-                                {h.resolution ? ` · แก้ไข: ${h.resolution}` : ''}
-                              </li>
-                            ))}
+                            {snHistory.slice(0, 3).map((h) => {
+                              const w = checkWarranty30Days(h)
+                              return (
+                                <li key={h.id}>
+                                  • <span className="font-ticket font-bold">{h.jobNo}</span> ({fmtDateTime(h.receivedAt)}) — อาการ:{' '}
+                                  <strong>{h.symptom}</strong>
+                                  {h.resolution ? ` · แก้ไข: ${h.resolution}` : ''}
+                                  {w && (
+                                    <span className="ml-1.5 rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-bold text-amber-950">
+                                      อยู่ระหว่างประกัน 30 วัน (เหลือ {w.daysRemaining} วัน)
+                                    </span>
+                                  )}
+                                </li>
+                              )
+                            })}
                           </ul>
                         </div>
                       )}
@@ -883,7 +1047,13 @@ function NewJob() {
                 </select>
               </Field>
               <Field label="หมายเหตุ" htmlFor="note">
-                <Textarea id="note" name="note" rows={2} />
+                <Textarea
+                  id="note"
+                  name="note"
+                  rows={2}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
               </Field>
             </div>
           </Panel>
