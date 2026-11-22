@@ -381,15 +381,44 @@ export function PageHeader({
   )
 }
 
+const STATUS_BADGE_STYLE: Record<string, { badge: string; dot: string }> = {
+  UNASSIGNED: {
+    badge: 'bg-slate-100 text-slate-700 border-slate-300',
+    dot: 'bg-slate-500',
+  },
+  ASSIGNED: {
+    badge: 'bg-blue-50 text-blue-700 border-blue-300',
+    dot: 'bg-blue-600',
+  },
+  IN_PROGRESS: {
+    badge: 'bg-sky-50 text-sky-700 border-sky-300',
+    dot: 'bg-sky-500',
+  },
+  WAITING_PARTS: {
+    badge: 'bg-amber-50 text-amber-800 border-amber-300',
+    dot: 'bg-amber-500',
+  },
+  COMPLETED: {
+    badge: 'bg-emerald-50 text-emerald-700 border-emerald-300',
+    dot: 'bg-emerald-600',
+  },
+  CANCELLED: {
+    badge: 'bg-rose-50 text-rose-700 border-rose-300',
+    dot: 'bg-rose-600',
+  },
+}
+
 export function StatusBadge({ status, className }: { status: JobStatus; className?: string }) {
+  const style = STATUS_BADGE_STYLE[status]
   return (
     <span
       className={cn(
-        'inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium',
-        STATUS_TONE[status],
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold',
+        style ? style.badge : STATUS_TONE[status],
         className,
       )}
     >
+      <span className={cn('size-1.5 rounded-full shrink-0', style ? style.dot : 'bg-current')} />
       {STATUS_LABEL[status]}
     </span>
   )
