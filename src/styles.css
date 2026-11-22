@@ -114,6 +114,30 @@ code {
   body {
     @apply bg-background text-foreground;
   }
+  button,
+  a,
+  [role='button'],
+  input[type='submit'],
+  input[type='button'],
+  select {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  input[type='submit']:not(:disabled),
+  input[type='button']:not(:disabled) {
+    transition:
+      transform 0.08s cubic-bezier(0.2, 0, 0, 1),
+      background-color 0.12s ease,
+      opacity 0.12s ease;
+  }
+  button:not(:disabled):active,
+  [role='button']:not([aria-disabled='true']):active,
+  input[type='submit']:not(:disabled):active,
+  input[type='button']:not(:disabled):active {
+    transform: scale(0.97);
+  }
 }
 
 @layer components {
