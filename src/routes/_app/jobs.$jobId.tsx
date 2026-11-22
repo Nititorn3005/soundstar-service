@@ -10,6 +10,7 @@ import {
   FileSearch,
   PackageMinus,
   Pencil,
+  RotateCcw,
   Save,
   Wrench,
 } from 'lucide-react'
@@ -34,6 +35,7 @@ import {
   isOverdue,
   type JobStatus,
   type RepairJob,
+  type Urgency,
 } from '@/lib/domain'
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
@@ -66,6 +68,14 @@ function formatBrandModel(job: RepairJob): string {
   return [brand, model].filter(Boolean).join(' ') || '—'
 }
 
+function toLocalDateTimeInput(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 function JobDetail() {
   const { jobId } = Route.useParams()
   const { jobs, currentUser } = useAppStore()
@@ -89,12 +99,13 @@ function JobDetail() {
 }
 
 function JobView({ job }: { job: RepairJob }) {
-  const { currentUser, profileName, inventory, company } = useAppStore()
+  const { currentUser, profileName, inventory, company, moveStock } = useAppStore()
   const role = currentUser!.role
   const [statusOpen, setStatusOpen] = React.useState(false)
   const [partOpen, setPartOpen] = React.useState(false)
   const [editCustomerOpen, setEditCustomerOpen] = React.useState(false)
   const [copiedLine, setCopiedLine] = React.useState(false)
+  const [returningPartIdx, setReturningPartIdx] = React.useState<number | null>(null)
   // สถานะเลือกรูปแบบการพิมพ์: 'FIELD' = ใบช่างออกหน้างาน, 'COMPLETE' = ใบซ่อมเสร็จ/ส่งคืน
   const [printMode, setPrintMode] = React.useState<'FIELD' | 'COMPLETE'>('FIELD')
 
@@ -128,7 +139,7 @@ function JobView({ job }: { job: RepairJob }) {
   }
 
   const handleCopyTechLine = async () => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://soundstar-service.netlify.app'
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://soundstar-service-01.netlify.app'
     const jobUrl = `${origin}/jobs/${job.id}`
     const techText = job.technicianId ? profileName(job.technicianId) : 'รอมอบหมายช่าง'
     const apptText = job.appointmentAt ? fmtDateTime(job.appointmentAt) : 'ตามสะดวก / นัดเพิ่ม'
@@ -159,6 +170,25 @@ function JobView({ job }: { job: RepairJob }) {
       setTimeout(() => setCopiedLine(false), 3000)
     } catch {
       toast.error('ไม่สามารถคัดลอกอัตโนมัติได้ กรุณาลองใหม่อีกครั้ง')
+    }
+  }
+
+  const handleReturnPart = async (partId: string, qty: number, partName: string, idx: number) => {
+    const confirmed = window.confirm(`ยืนยันคืนอะไหล่ "${partName}" จำนวน ${qty} ชิ้น กลับเข้าสต๊อกสำหรับใบงาน ${job.jobNo}?`)
+    if (!confirmed) return
+    setReturningPartIdx(idx)
+    try {
+      const res = await moveStock({
+        partId,
+        type: 'IN',
+        qty,
+        jobId: job.id,
+        note: `คืนอะไหล่จากใบงาน ${job.jobNo}`,
+      })
+      if (!res.ok) return toast.error(res.error)
+      toast.success(`คืน ${partName} × ${qty} เข้าสต๊อกแล้ว (คงเหลือ ${res.value.balanceAfter})`)
+    } finally {
+      setReturningPartIdx(null)
     }
   }
 
@@ -244,7 +274,6 @@ function JobView({ job }: { job: RepairJob }) {
 
           {/* ข้อมูลลูกค้า และ ข้อมูลเครื่อง (2 คอลัมน์) */}
           <div className="mt-2 grid grid-cols-2 gap-2.5">
-            {/* กล่องข้อมูลลูกค้า */}
             <div className="border border-black p-2.5">
               <h2 className="border-b border-black pb-1 text-[13px] font-bold">1. ข้อมูลลูกค้าและสถานที่ปฏิบัติงาน</h2>
               <div className="mt-1.5 space-y-1 text-[12px] leading-snug">
@@ -263,7 +292,6 @@ function JobView({ job }: { job: RepairJob }) {
               </div>
             </div>
 
-            {/* กล่องข้อมูลเครื่อง */}
             <div className="border border-black p-2.5">
               <h2 className="border-b border-black pb-1 text-[13px] font-bold">2. ข้อมูลเครื่องซ่อมและอาการเสีย</h2>
               <div className="mt-1.5 space-y-1 text-[12px] leading-snug">
@@ -311,7 +339,6 @@ function JobView({ job }: { job: RepairJob }) {
               </div>
             </div>
 
-            {/* ตารางอะไหล่และค่าใช้จ่าย */}
             <div className="mt-2.5">
               <p className="mb-1 text-[12px] font-bold">รายการอะไหล่ที่เปลี่ยน / ค่าบริการหน้างาน:</p>
               <table className="w-full border-collapse border border-black text-[11px]">
@@ -344,7 +371,6 @@ function JobView({ job }: { job: RepairJob }) {
               </table>
             </div>
 
-            {/* สรุปผลการซ่อมหน้างาน */}
             <div className="mt-2.5 border-t border-black pt-2 text-[11.5px]">
               <p className="font-bold mb-1">สรุปผลการปฏิบัติงาน:</p>
               <div className="grid grid-cols-2 gap-1.5">
@@ -356,7 +382,6 @@ function JobView({ job }: { job: RepairJob }) {
             </div>
           </div>
 
-          {/* เงื่อนไขการรับประกันอะไหล่ */}
           <div className="mt-2 border border-black bg-gray-50 px-2.5 py-1.5 text-[11px] leading-snug">
             <p>
               <span className="font-bold">เงื่อนไขการรับประกัน:</span> อะไหล่แท้จาก{' '}
@@ -365,7 +390,6 @@ function JobView({ job }: { job: RepairJob }) {
             </p>
           </div>
 
-          {/* ช่องลายมือชื่อ 3 ช่อง */}
           <div className="mt-2.5 grid grid-cols-3 gap-4 border border-black p-2.5 text-center text-[11.5px]">
             <div>
               <p className="font-semibold">ผู้รับบริการ / ลูกค้า</p>
@@ -473,7 +497,6 @@ function JobView({ job }: { job: RepairJob }) {
             )}
           </div>
 
-          {/* เงื่อนไขการรับประกันอะไหล่ */}
           <div className="mt-2.5 border border-black bg-gray-50 px-3 py-2 text-[11px] leading-snug">
             <p>
               <span className="font-bold">เงื่อนไขการรับประกัน:</span> อะไหล่แท้จาก{' '}
@@ -602,10 +625,26 @@ function JobView({ job }: { job: RepairJob }) {
                     return (
                       <li key={i} className="flex items-center justify-between gap-2 py-1.5">
                         <div>
-                          <p className="font-medium">{item?.name}</p>
+                          <p className="font-medium">{item?.name || 'อะไหล่'}</p>
                           <p className="font-ticket text-[10px] text-muted-foreground">{item?.code} · {fmtDateTime(p.at)} · {profileName(p.by)}</p>
                         </div>
-                        <span className="font-ticket">× {p.qty} {item?.unit}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-ticket">× {p.qty} {item?.unit}</span>
+                          {canWork && !closed && p.qty > 0 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={returningPartIdx === i}
+                              onClick={() => handleReturnPart(p.partId, p.qty, item?.name || 'อะไหล่', i)}
+                              className="no-print h-7 px-2 text-[11px] text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                              title="คืนอะไหล่รายการนี้กลับเข้าสต๊อก"
+                            >
+                              <RotateCcw className="mr-1 size-3" />
+                              {returningPartIdx === i ? 'กำลังคืน...' : 'คืนสต๊อก'}
+                            </Button>
+                          )}
+                        </div>
                       </li>
                     )
                   })}
@@ -769,11 +808,11 @@ function EditCustomerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>แก้ไขข้อมูลลูกค้าและเครื่อง</DialogTitle>
           <DialogDescription>
-            ปรับปรุงรายละเอียดข้อมูลลูกค้าและเครื่องซ่อมสำหรับใบงาน <JobNo>{job.jobNo}</JobNo>
+            ปรับปรุงรายละเอียดข้อมูลลูกค้า วันนัดหมาย และเครื่องซ่อมสำหรับใบงาน <JobNo>{job.jobNo}</JobNo>
           </DialogDescription>
         </DialogHeader>
         <form
@@ -781,11 +820,15 @@ function EditCustomerDialog({
           onSubmit={async (e) => {
             e.preventDefault()
             const f = new FormData(e.currentTarget)
+            const rawAppt = String(f.get('appointmentAt') || '').trim()
+            const appointmentAt = rawAppt ? new Date(rawAppt).toISOString() : undefined
             const res = await updateJob(job.id, {
               customerName: String(f.get('customerName')),
               phone: String(f.get('phone')),
               contactName: String(f.get('contactName') || ''),
               address: String(f.get('address') || ''),
+              urgency: String(f.get('urgency') || job.urgency) as Urgency,
+              appointmentAt,
               machineType: String(f.get('machineType')),
               brand: String(f.get('brand')),
               model: String(f.get('model') || ''),
@@ -795,7 +838,7 @@ function EditCustomerDialog({
               note: String(f.get('note') || ''),
             })
             if (!res.ok) return toast.error(res.error)
-            toast.success('บันทึกการแก้ไขข้อมูลลูกค้าแล้ว')
+            toast.success('บันทึกการแก้ไขข้อมูลเรียบร้อยแล้ว')
             onOpenChange(false)
           }}
         >
@@ -810,6 +853,25 @@ function EditCustomerDialog({
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="ผู้ติดต่อ" htmlFor="contactName">
               <Input id="contactName" name="contactName" defaultValue={job.contactName || ''} />
+            </Field>
+            <Field label="ระดับความเร่งด่วน" htmlFor="urgency">
+              <select id="urgency" name="urgency" className="native-select" defaultValue={job.urgency}>
+                {(Object.keys(URGENCY_LABEL) as Urgency[]).map((u) => (
+                  <option key={u} value={u}>
+                    {URGENCY_LABEL[u]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="วันที่นัดหมาย" htmlFor="appointmentAt">
+              <Input
+                id="appointmentAt"
+                name="appointmentAt"
+                type="datetime-local"
+                defaultValue={toLocalDateTimeInput(job.appointmentAt)}
+              />
             </Field>
             <Field label="ประเภทเครื่อง" htmlFor="machineType">
               <Input id="machineType" name="machineType" defaultValue={job.applianceType || job.machineType} required />
@@ -835,6 +897,9 @@ function EditCustomerDialog({
           <Field label="รายละเอียดเพิ่มเติม" htmlFor="details">
             <Textarea id="details" name="details" defaultValue={job.details || ''} rows={2} />
           </Field>
+          <Field label="หมายเหตุ" htmlFor="note">
+            <Input id="note" name="note" defaultValue={job.note || ''} />
+          </Field>
           <DialogFooter className="mt-2">
             <Button type="submit">บันทึกการเปลี่ยนแปลง</Button>
           </DialogFooter>
@@ -857,6 +922,8 @@ function StatusDialog({
 }) {
   const { changeStatus } = useAppStore()
   const [to, setTo] = React.useState<JobStatus | ''>('')
+  const missingRepairNotes = !job.diagnosis?.trim() && !job.resolution?.trim() && !job.result?.trim()
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -873,6 +940,9 @@ function StatusDialog({
             if (!to) return toast.error('กรุณาเลือกสถานะใหม่')
             const note = String(new FormData(e.currentTarget).get('note') ?? '')
             if (to === 'CANCELLED' && !note.trim()) return toast.error('กรุณาระบุเหตุผลการยกเลิก')
+            if (to === 'COMPLETED' && missingRepairNotes) {
+              return toast.error('กรุณากรอกผลการตรวจสอบ วิธีแก้ไข หรือผลการซ่อม และกด "บันทึกผล" ก่อนปิดงาน')
+            }
             const res = await changeStatus(job.id, to, note || undefined)
             if (!res.ok) return toast.error(res.error)
             toast.success(`เปลี่ยนสถานะเป็น “${STATUS_LABEL[to]}” แล้ว`)
@@ -898,6 +968,11 @@ function StatusDialog({
               </button>
             ))}
           </div>
+          {to === 'COMPLETED' && missingRepairNotes && (
+            <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              ⚠️ ยังไม่ได้บันทึกผลการตรวจสอบ / วิธีแก้ไข / ผลการซ่อม กรุณากรอกและกด <strong>บันทึกผล</strong> ก่อนปิดงาน
+            </p>
+          )}
           <Field label="หมายเหตุ" htmlFor="status-note" hint={to === 'CANCELLED' ? 'จำเป็นสำหรับการยกเลิก' : undefined}>
             <Textarea id="status-note" name="note" rows={2} />
           </Field>
