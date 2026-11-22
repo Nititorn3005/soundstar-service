@@ -4,6 +4,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   BarChart3,
+  BookOpen,
   Building2,
   ClipboardList,
   FileSearch,
@@ -52,6 +53,7 @@ type NavPath =
   | '/inventory/receive'
   | '/inventory/issue'
   | '/inventory/history'
+  | '/error-codes'
   | '/users'
   | '/reports'
   | '/settings'
@@ -73,6 +75,7 @@ export const NAV: NavItem[] = [
   { to: '/inventory/receive', label: 'รับอะไหล่เข้า', icon: ArrowDownToLine, roles: ['ADMIN'] },
   { to: '/inventory/issue', label: 'เบิกอะไหล่ออก', icon: ArrowUpFromLine, roles: ['ADMIN', 'TECH'] },
   { to: '/inventory/history', label: 'ประวัติสต๊อก', icon: History, roles: ['ADMIN', 'TECH'] },
+  { to: '/error-codes', label: 'คู่มือโค้ด Error', icon: BookOpen, roles: ALL },
   { to: '/users', label: 'จัดการผู้ใช้งาน', icon: Users, roles: ['ADMIN'] },
   { to: '/reports', label: 'รายงาน', icon: BarChart3, roles: ['ADMIN'] },
   { to: '/settings', label: 'ตั้งค่าบริษัท', icon: Building2, roles: ['ADMIN'] },
@@ -174,7 +177,9 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
         }}
         className="mt-2 flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground/80 transition-colors hover:bg-destructive/20 hover:text-sidebar-accent-foreground"
       >
-        <span className="w-5 font-ticket text-[10px] opacity-40">12</span>
+        <span className="w-5 font-ticket text-[10px] opacity-40">
+          {String(NAV.length + 1).padStart(2, '0')}
+        </span>
         <LogOut className="size-4" aria-hidden />
         ออกจากระบบ
       </button>
