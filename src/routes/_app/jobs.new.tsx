@@ -1,19 +1,19 @@
 import * as React from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { Camera, Loader2, Plus, Save, Trash2, X } from 'lucide-react'
+import { Camera, History, Loader2, Plus, Save, Trash2, UserCheck, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Field, PageHeader, Panel, RoleGate } from '@/components/app/shell'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { MACHINE_TYPES, URGENCY_LABEL, fmtDateTime, type UrgencyLevel } from '@/lib/domain'
+import { MACHINE_TYPES, URGENCY_LABEL, fmtDateTime, type RepairJob, type UrgencyLevel } from '@/lib/domain'
 import { useAppStore } from '@/lib/store'
 
 export const Route = createFileRoute('/_app/jobs/new')({
   head: () => ({ meta: [{ title: 'รับแจ้งงานซ่อม · Hatyai Soundstar' }] }),
   component: () => (
-    <RoleGate roles={['ADMIN', 'RECEPTION', 'TECH']}>
+    <RoleGate roles={['ADMIN', 'FRONT', 'TECH']}>
       <NewJob />
     </RoleGate>
   ),
@@ -43,11 +43,21 @@ interface JobItemState {
 type Errors = Partial<Record<'customerName' | 'phone' | 'address' | 'items' | 'photos', string>>
 
 function NewJob() {
-  const { createJob, profiles, currentUser } = useAppStore()
+  const { createJob, profiles, currentUser, jobs } = useAppStore()
   const navigate = useNavigate()
   const [errors, setErrors] = React.useState<Errors>({})
   const [photos, setPhotos] = React.useState<File[]>([])
   const [pending, setPending] = React.useState(false)
+
+  // ข้อมูลลูกค้า (controlled เพื่อรองรับการดึงประวัติลูกค้าเดิมอัตโนมัติ)
+  const [customerName, setCustomerName] = React.useState('')
+  const [phone, setPhone] = React.useState('')
+  const [contactName, setContactName] = React.useState('')
+  const [selectedHistoryCustomer, setSelectedHistoryCustomer] = React.useState<{
+    customerName: string
+    phone: string
+    pastJobs: RepairJob[]
+  } | null>(null)
 
   // ฐานข้อมูล จังหวัด / อำเภอ / ตำบล ของประเทศไทย
   const [thaiDb, setThaiDb] = React.useState<ThaiAddressEntry[]>([])
@@ -108,6 +118,95 @@ function NewJob() {
     }
   }
 
+  // ค้นหาประวัติลูกค้าเดิมจากชื่อหรือเบอร์โทรที่กำลังพิมพ์
+  const matchingCustomers = React.useMemo(() => {
+    const cleanPhone = phone.replace(/[-\s]/g, '')
+    const cleanName = customerName.trim().toLowerCase()
+    if (cleanPhone.length < 3 && cleanName.length < 2) return []
+
+    const grouped = new Map<string, { customerName: string; phone: string; latestJob: RepairJob; pastJobs: RepairJob[] }>()
+    for (const j of jobs) {
+      const jPhone = j.phone.replace(/[-\s]/g, '')
+      const jName = j.customerName.toLowerCase()
+      const matchPhone = cleanPhone.length >= 3 && jPhone.includes(cleanPhone)
+      const matchName = cleanName.length >= 2 && jName.includes(cleanName)
+      if (!matchPhone && !matchName) continue
+
+      const key = `${j.customerName.trim()}|${jPhone}`
+      const existing = grouped.get(key)
+      if (!existing) {
+        grouped.set(key, { customerName: j.customerName, phone: j.phone, latestJob: j, pastJobs: [j] })
+      } else {
+        existing.pastJobs.push(j)
+      }
+    }
+    return Array.from(grouped.values()).slice(0, 4)
+  }, [jobs, customerName, phone])
+
+  // ฟังก์ชันดึงข้อมูลลูกค้าเก่าลงฟอร์ม (พร้อมแยกที่อยู่ ต./อ./จ./รหัสไปรษณีย์ อัตโนมัติ)
+  const applyCustomerHistory = (entry: {
+    customerName: string
+    phone: string
+    latestJob: RepairJob
+    pastJobs: RepairJob[]
+  }) => {
+    const j = entry.latestJob
+    setCustomerName(j.customerName)
+    setPhone(j.phone)
+    setContactName(j.contactName || '')
+    setSelectedHistoryCustomer({
+      customerName: j.customerName,
+      phone: j.phone,
+      pastJobs: entry.pastJobs,
+    })
+
+    // พยายามแยกที่อยู่เก่ากลับเข้าช่องรายละเอียด + จังหวัด/อำเภอ/ตำบล
+    let rawAddr = j.address || ''
+    const zipMatch = rawAddr.match(/\b(\d{5})\b/)
+    if (zipMatch) {
+      setZipcode(zipMatch[1])
+      rawAddr = rawAddr.replace(zipMatch[0], '').trim()
+    }
+    const provMatch = rawAddr.match(/(?:จ\.|จังหวัด)\s*([^\s]+)/)
+    if (provMatch) {
+      setProvince(provMatch[1])
+      rawAddr = rawAddr.replace(provMatch[0], '').trim()
+    } else if (rawAddr.includes('กรุงเทพมหานคร')) {
+      setProvince('กรุงเทพมหานคร')
+      rawAddr = rawAddr.replace('กรุงเทพมหานคร', '').trim()
+    }
+    const ampMatch = rawAddr.match(/(?:อ\.|อำเภอ|เขต)\s*([^\s]+)/)
+    if (ampMatch) {
+      setAmphoe(ampMatch[1])
+      rawAddr = rawAddr.replace(ampMatch[0], '').trim()
+    }
+    const distMatch = rawAddr.match(/(?:ต\.|ตำบล|แขวง)\s*([^\s]+)/)
+    if (distMatch) {
+      setDistrict(distMatch[1])
+      rawAddr = rawAddr.replace(distMatch[0], '').trim()
+    }
+    setAddressDetail(rawAddr.trim())
+    toast.success(`ดึงข้อมูลลูกค้า "${j.customerName}" เรียบร้อย`)
+  }
+
+  // ดึงข้อมูลเครื่องจากประวัติเก่าลงในรายการแจ้งซ่อม
+  const applyMachineFromHistory = (pastJob: RepairJob) => {
+    const newItem: JobItemState = {
+      applianceType: pastJob.machineType || MACHINE_TYPES[0] || 'เครื่องซักฝาบน',
+      brand: pastJob.brand || '',
+      model: pastJob.model || '',
+      serialNumber: pastJob.serialNo || '',
+      symptom: '',
+    }
+    setItems((prev) => {
+      if (prev.length === 1 && !prev[0].brand && !prev[0].model && !prev[0].symptom) {
+        return [newItem]
+      }
+      return [...prev, newItem]
+    })
+    toast.success(`เพิ่มข้อมูลเครื่อง ${pastJob.brand} ${pastJob.model} ลงฟอร์มแล้ว`)
+  }
+
   // รายการเครื่องแจ้งซ่อม (เริ่มต้น 1 เครื่อง)
   const [items, setItems] = React.useState<JobItemState[]>([
     { applianceType: MACHINE_TYPES[0] || 'เครื่องซักฝาบน', brand: '', model: '', symptom: '' },
@@ -160,8 +259,8 @@ function NewJob() {
     const v = (k: string) => String(f.get(k) ?? '').trim()
     const e: Errors = {}
 
-    if (!v('customerName')) e.customerName = 'กรุณากรอกชื่อลูกค้า'
-    if (!/^0\d{8,9}$/.test(v('phone').replace(/[-\s]/g, ''))) e.phone = 'เบอร์โทรไม่ถูกต้อง'
+    if (!customerName.trim()) e.customerName = 'กรุณากรอกชื่อลูกค้า'
+    if (!/^0\d{8,9}$/.test(phone.replace(/[-\s]/g, ''))) e.phone = 'เบอร์โทรไม่ถูกต้อง'
 
     // ประกอบที่อยู่ฉบับเต็มจากช่องกรอก + จังหวัด/อำเภอ/ตำบล
     const isBkk = province === 'กรุงเทพมหานคร'
@@ -204,9 +303,9 @@ function NewJob() {
 
     setPending(true)
     const res = await createJob({
-      customerName: v('customerName'),
-      phone: v('phone'),
-      contactName: v('contactName') || undefined,
+      customerName: customerName.trim(),
+      phone: phone.trim(),
+      contactName: contactName.trim() || undefined,
       address: fullAddress,
       items: items.map((i) => ({
         applianceType: i.applianceType,
@@ -243,13 +342,125 @@ function NewJob() {
           <Panel title="ข้อมูลลูกค้า">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="ชื่อลูกค้า" htmlFor="customerName" error={errors.customerName} required>
-                <Input id="customerName" name="customerName" className="h-11" />
+                <Input
+                  id="customerName"
+                  name="customerName"
+                  className="h-11"
+                  value={customerName}
+                  onChange={(e) => {
+                    setCustomerName(e.target.value)
+                    setSelectedHistoryCustomer(null)
+                  }}
+                />
               </Field>
               <Field label="เบอร์โทรศัพท์" htmlFor="phone" error={errors.phone} required>
-                <Input id="phone" name="phone" type="tel" inputMode="tel" className="h-11 font-ticket" placeholder="08x-xxx-xxxx" />
+                <Input
+                  id="phone"
+                  name="phone"
+                  type="tel"
+                  inputMode="tel"
+                  className="h-11 font-ticket"
+                  placeholder="08x-xxx-xxxx"
+                  value={phone}
+                  onChange={(e) => {
+                    setPhone(e.target.value)
+                    setSelectedHistoryCustomer(null)
+                  }}
+                />
               </Field>
+
+              {/* กล่องแนะนำลูกค้าเดิมที่ตรงกับชื่อหรือเบอร์โทร */}
+              {!selectedHistoryCustomer && matchingCustomers.length > 0 && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50/80 p-3 text-xs sm:col-span-2">
+                  <div className="mb-2 flex items-center gap-1.5 font-semibold text-blue-900">
+                    <UserCheck className="size-4 text-blue-600" />
+                    พบประวัติลูกค้าเดิมในระบบ ({matchingCustomers.length} รายการ) — คลิกเพื่อดึงข้อมูลอัตโนมัติ
+                  </div>
+                  <div className="grid gap-2">
+                    {matchingCustomers.map((entry, idx) => (
+                      <div
+                        key={idx}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200/80 bg-white px-3 py-2"
+                      >
+                        <div>
+                          <p className="font-semibold text-foreground">
+                            {entry.customerName} <span className="font-ticket text-primary">({entry.phone})</span>
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {entry.latestJob.address} · เคยแจ้งซ่อม {entry.pastJobs.length} ครั้ง
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="h-8 text-xs"
+                          onClick={() => applyCustomerHistory(entry)}
+                        >
+                          ใช้ข้อมูลลูกค้านี้
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* แสดงประวัติการซ่อมที่ผ่านมาของลูกค้าที่เลือก */}
+              {selectedHistoryCustomer && selectedHistoryCustomer.pastJobs.length > 0 && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs sm:col-span-2">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-semibold text-emerald-900">
+                      <History className="size-4 text-emerald-600" />
+                      ประวัติเครื่องที่เคยซ่อมของลูกค้านี้ ({selectedHistoryCustomer.pastJobs.length} รายการ)
+                    </span>
+                    <button
+                      type="button"
+                      className="text-[11px] text-muted-foreground hover:underline"
+                      onClick={() => setSelectedHistoryCustomer(null)}
+                    >
+                      ซ่อนประวัติ
+                    </button>
+                  </div>
+                  <div className="grid gap-1.5">
+                    {selectedHistoryCustomer.pastJobs.slice(0, 5).map((pj) => (
+                      <div
+                        key={pj.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200/80 bg-white px-2.5 py-1.5"
+                      >
+                        <div>
+                          <span className="font-ticket font-bold text-primary">{pj.jobNo}</span>{' '}
+                          <span className="font-medium">
+                            {pj.machineType} {pj.brand} {pj.model}
+                          </span>
+                          {pj.serialNo ? <span className="font-ticket text-muted-foreground"> (S/N: {pj.serialNo})</span> : null}
+                          <p className="text-[11px] text-muted-foreground">
+                            วันที่ {fmtDateTime(pj.receivedAt)} · อาการ: {pj.symptom}
+                            {pj.result ? ` · ผล: ${pj.result}` : ''}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-[11px]"
+                          onClick={() => applyMachineFromHistory(pj)}
+                        >
+                          + ดึงเครื่องนี้เข้าใบงาน
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <Field label="ชื่อผู้ติดต่อ" htmlFor="contactName" className="sm:col-span-2">
-                <Input id="contactName" name="contactName" className="h-11" />
+                <Input
+                  id="contactName"
+                  name="contactName"
+                  className="h-11"
+                  value={contactName}
+                  onChange={(e) => setContactName(e.target.value)}
+                />
               </Field>
 
               {/* ที่อยู่แบบเลือก จังหวัด / อำเภอ / ตำบล */}
@@ -334,104 +545,130 @@ function NewJob() {
           {/* ข้อมูลเครื่องและอาการ (รองรับหลายเครื่อง) */}
           <Panel title="รายการเครื่องและอาการเสีย">
             {errors.items && <p className="mb-4 text-xs font-semibold text-destructive">{errors.items}</p>}
-            
+
             <div className="divide-y divide-border">
-              {items.map((item, index) => (
-                <div key={index} className="py-4 first:pt-0 last:pb-0">
-                  <div className="mb-3 flex items-center justify-between">
-                    <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground">
-                      เครื่องที่ {index + 1}
-                    </span>
-                    {items.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemoveItem(index)}
-                        className="h-8 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <Trash2 className="mr-1 size-3.5" /> ลบเครื่องนี้
-                      </Button>
-                    )}
+              {items.map((item, index) => {
+                const snNeedle = (item.serialNumber || '').trim().toLowerCase()
+                const snHistory =
+                  snNeedle.length >= 4
+                    ? jobs.filter((j) => (j.serialNo || '').toLowerCase().includes(snNeedle))
+                    : []
+
+                return (
+                  <div key={index} className="py-4 first:pt-0 last:pb-0">
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground">
+                        เครื่องที่ {index + 1}
+                      </span>
+                      {items.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveItem(index)}
+                          className="h-8 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <Trash2 className="mr-1 size-3.5" /> ลบเครื่องนี้
+                        </Button>
+                      )}
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field label="ประเภทเครื่อง" htmlFor={`type-${index}`} required>
+                        <select
+                          id={`type-${index}`}
+                          className="native-select"
+                          value={item.applianceType}
+                          onChange={(e) => handleItemChange(index, 'applianceType', e.target.value)}
+                        >
+                          {MACHINE_TYPES.map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      </Field>
+
+                      <Field label="ยี่ห้อ" htmlFor={`brand-${index}`} required>
+                        <Input
+                          id={`brand-${index}`}
+                          list="brands"
+                          className="h-11"
+                          value={item.brand}
+                          onChange={(e) => handleItemChange(index, 'brand', e.target.value)}
+                        />
+                        <datalist id="brands">
+                          {['LG', 'Samsung', 'Electrolux', 'Toshiba', 'Hitachi', 'Panasonic', 'Sharp', 'Haier', 'Beko'].map((b) => (
+                            <option key={b} value={b} />
+                          ))}
+                        </datalist>
+                      </Field>
+
+                      <Field label="รุ่น" htmlFor={`model-${index}`} required>
+                        <Input
+                          id={`model-${index}`}
+                          className="h-11 font-ticket"
+                          value={item.model}
+                          onChange={(e) => handleItemChange(index, 'model', e.target.value)}
+                        />
+                      </Field>
+
+                      <Field label="หมายเลขเครื่อง" htmlFor={`serial-${index}`} hint="ถ้ามี (ระบบค้นหาประวัติ S/N อัตโนมัติ)">
+                        <Input
+                          id={`serial-${index}`}
+                          className="h-11 font-ticket"
+                          value={item.serialNumber || ''}
+                          onChange={(e) => handleItemChange(index, 'serialNumber', e.target.value)}
+                        />
+                      </Field>
+
+                      {snHistory.length > 0 && (
+                        <div className="rounded-xl border border-amber-300 bg-amber-50/80 p-3 text-xs sm:col-span-2">
+                          <p className="mb-1 flex items-center gap-1.5 font-semibold text-amber-900">
+                            <History className="size-4 text-amber-600" />
+                            พบประวัติการซ่อมของ Serial No. นี้ ({snHistory.length} ครั้ง)
+                          </p>
+                          <ul className="space-y-1 text-[11px] text-amber-950">
+                            {snHistory.slice(0, 3).map((h) => (
+                              <li key={h.id}>
+                                • <span className="font-ticket font-bold">{h.jobNo}</span> ({fmtDateTime(h.receivedAt)}) — อาการ:{' '}
+                                <strong>{h.symptom}</strong>
+                                {h.resolution ? ` · แก้ไข: ${h.resolution}` : ''}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      <Field label="วันที่ซื้อ" htmlFor={`purchaseDate-${index}`} hint="ถ้ามี / ไม่บังคับกรอก">
+                        <Input
+                          id={`purchaseDate-${index}`}
+                          type="date"
+                          className="h-11"
+                          value={item.purchaseDate || ''}
+                          onChange={(e) => handleItemChange(index, 'purchaseDate', e.target.value)}
+                        />
+                      </Field>
+
+                      <Field label="อาการเสีย" htmlFor={`symptom-${index}`} required className="sm:col-span-2">
+                        <Input
+                          id={`symptom-${index}`}
+                          className="h-11"
+                          value={item.symptom}
+                          onChange={(e) => handleItemChange(index, 'symptom', e.target.value)}
+                        />
+                      </Field>
+
+                      <Field label="รายละเอียดเพิ่มเติม" htmlFor={`details-${index}`} className="sm:col-span-2">
+                        <Textarea
+                          id={`details-${index}`}
+                          rows={2}
+                          value={item.details || ''}
+                          onChange={(e) => handleItemChange(index, 'details', e.target.value)}
+                        />
+                      </Field>
+                    </div>
                   </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="ประเภทเครื่อง" htmlFor={`type-${index}`} required>
-                      <select
-                        id={`type-${index}`}
-                        className="native-select"
-                        value={item.applianceType}
-                        onChange={(e) => handleItemChange(index, 'applianceType', e.target.value)}
-                      >
-                        {MACHINE_TYPES.map((m) => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-                    </Field>
-
-                    <Field label="ยี่ห้อ" htmlFor={`brand-${index}`} required>
-                      <Input
-                        id={`brand-${index}`}
-                        list="brands"
-                        className="h-11"
-                        value={item.brand}
-                        onChange={(e) => handleItemChange(index, 'brand', e.target.value)}
-                      />
-                      <datalist id="brands">
-                        {['LG', 'Samsung', 'Electrolux', 'Toshiba', 'Hitachi', 'Panasonic', 'Sharp', 'Haier', 'Beko'].map((b) => (
-                          <option key={b} value={b} />
-                        ))}
-                      </datalist>
-                    </Field>
-
-                    <Field label="รุ่น" htmlFor={`model-${index}`} required>
-                      <Input
-                        id={`model-${index}`}
-                        className="h-11 font-ticket"
-                        value={item.model}
-                        onChange={(e) => handleItemChange(index, 'model', e.target.value)}
-                      />
-                    </Field>
-
-                    <Field label="หมายเลขเครื่อง" htmlFor={`serial-${index}`} hint="ถ้ามี">
-                      <Input
-                        id={`serial-${index}`}
-                        className="h-11 font-ticket"
-                        value={item.serialNumber || ''}
-                        onChange={(e) => handleItemChange(index, 'serialNumber', e.target.value)}
-                      />
-                    </Field>
-
-                    <Field label="วันที่ซื้อ" htmlFor={`purchaseDate-${index}`} hint="ถ้ามี / ไม่บังคับกรอก">
-                      <Input
-                        id={`purchaseDate-${index}`}
-                        type="date"
-                        className="h-11"
-                        value={item.purchaseDate || ''}
-                        onChange={(e) => handleItemChange(index, 'purchaseDate', e.target.value)}
-                      />
-                    </Field>
-
-                    <Field label="อาการเสีย" htmlFor={`symptom-${index}`} required className="sm:col-span-2">
-                      <Input
-                        id={`symptom-${index}`}
-                        className="h-11"
-                        value={item.symptom}
-                        onChange={(e) => handleItemChange(index, 'symptom', e.target.value)}
-                      />
-                    </Field>
-
-                    <Field label="รายละเอียดเพิ่มเติม" htmlFor={`details-${index}`} className="sm:col-span-2">
-                      <Textarea
-                        id={`details-${index}`}
-                        rows={2}
-                        value={item.details || ''}
-                        onChange={(e) => handleItemChange(index, 'details', e.target.value)}
-                      />
-                    </Field>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
 
             <Button
