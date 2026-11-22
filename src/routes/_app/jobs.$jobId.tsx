@@ -51,6 +51,15 @@ const REPAIR_RESULT_OPTIONS = [
   'อื่นๆ',
 ]
 
+const UNKNOWN_VALUE = '__UNKNOWN__'
+
+interface ThaiAddressEntry {
+  district: string // ตำบล/แขวง
+  amphoe: string // อำเภอ/เขต
+  province: string // จังหวัด
+  zipcode: number | string
+}
+
 export const Route = createFileRoute('/_app/jobs/$jobId')({
   head: () => ({ meta: [{ title: 'รายละเอียดงานซ่อม · Hatyai Soundstar' }] }),
   component: JobDetail,
@@ -74,6 +83,49 @@ function toLocalDateTimeInput(iso?: string): string {
   if (Number.isNaN(d.getTime())) return ''
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function parseThaiAddress(rawAddress?: string) {
+  let rawAddr = rawAddress || ''
+  let zipcode = ''
+  let province = UNKNOWN_VALUE
+  let amphoe = UNKNOWN_VALUE
+  let district = UNKNOWN_VALUE
+
+  const zipMatch = rawAddr.match(/\b(\d{5})\b/)
+  if (zipMatch) {
+    zipcode = zipMatch[1]
+    rawAddr = rawAddr.replace(zipMatch[0], '').trim()
+  }
+
+  const provMatch = rawAddr.match(/(?:จ\.|จังหวัด)\s*([^\s]+)/)
+  if (provMatch) {
+    province = provMatch[1]
+    rawAddr = rawAddr.replace(provMatch[0], '').trim()
+  } else if (rawAddr.includes('กรุงเทพมหานคร')) {
+    province = 'กรุงเทพมหานคร'
+    rawAddr = rawAddr.replace('กรุงเทพมหานคร', '').trim()
+  }
+
+  const ampMatch = rawAddr.match(/(?:อ\.|อำเภอ|เขต)\s*([^\s]+)/)
+  if (ampMatch) {
+    amphoe = ampMatch[1]
+    rawAddr = rawAddr.replace(ampMatch[0], '').trim()
+  }
+
+  const distMatch = rawAddr.match(/(?:ต\.|ตำบล|แขวง)\s*([^\s]+)/)
+  if (distMatch) {
+    district = distMatch[1]
+    rawAddr = rawAddr.replace(distMatch[0], '').trim()
+  }
+
+  return {
+    addressDetail: rawAddr.trim(),
+    province,
+    amphoe,
+    district,
+    zipcode,
+  }
 }
 
 function JobDetail() {
@@ -106,7 +158,6 @@ function JobView({ job }: { job: RepairJob }) {
   const [editCustomerOpen, setEditCustomerOpen] = React.useState(false)
   const [copiedLine, setCopiedLine] = React.useState(false)
   const [returningPartIdx, setReturningPartIdx] = React.useState<number | null>(null)
-  // สถานะเลือกรูปแบบการพิมพ์: 'FIELD' = ใบช่างออกหน้างาน, 'COMPLETE' = ใบซ่อมเสร็จ/ส่งคืน
   const [printMode, setPrintMode] = React.useState<'FIELD' | 'COMPLETE'>('FIELD')
 
   const next = allowedNextStatuses(job.status, role)
@@ -225,7 +276,6 @@ function JobView({ job }: { job: RepairJob }) {
       {/* ==================== ฟอร์มพิมพ์: ใบช่างออกหน้างาน (FIELD) ==================== */}
       {printMode === 'FIELD' && (
         <div className="hidden print:block text-black" style={{ fontFamily: "'Sarabun', sans-serif" }}>
-          {/* หัวเอกสารพร้อมโลโก้บริษัท */}
           <div className="flex items-start justify-between border-b-2 border-black pb-2">
             <div className="flex items-start gap-3">
               <img
@@ -257,7 +307,6 @@ function JobView({ job }: { job: RepairJob }) {
             </div>
           </div>
 
-          {/* แถบข้อมูลการรับแจ้ง & ช่าง */}
           <div className="mt-2 grid grid-cols-3 border border-black bg-gray-100 px-2.5 py-1.5 text-[12px]">
             <div>
               <span className="font-semibold">วันที่รับแจ้ง:</span> {fmtDateTime(job.receivedAt)}
@@ -272,7 +321,6 @@ function JobView({ job }: { job: RepairJob }) {
             </div>
           </div>
 
-          {/* ข้อมูลลูกค้า และ ข้อมูลเครื่อง (2 คอลัมน์) */}
           <div className="mt-2 grid grid-cols-2 gap-2.5">
             <div className="border border-black p-2.5">
               <h2 className="border-b border-black pb-1 text-[13px] font-bold">1. ข้อมูลลูกค้าและสถานที่ปฏิบัติงาน</h2>
@@ -317,7 +365,6 @@ function JobView({ job }: { job: RepairJob }) {
             </div>
           </div>
 
-          {/* ส่วนบันทึกของช่างหน้างาน */}
           <div className="mt-2 border border-black p-2.5">
             <div className="flex items-center justify-between border-b border-black pb-1">
               <h2 className="text-[13px] font-bold">3. บันทึกการตรวจเช็กและการปฏิบัติงานของช่าง (สำหรับช่างกรอกหน้างาน)</h2>
@@ -805,6 +852,79 @@ function EditCustomerDialog({
   onOpenChange: (v: boolean) => void
 }) {
   const { updateJob } = useAppStore()
+  const [thaiDb, setThaiDb] = React.useState<ThaiAddressEntry[]>([])
+  const [loadingThaiDb, setLoadingThaiDb] = React.useState(false)
+
+  const initialParsed = React.useMemo(() => parseThaiAddress(job.address), [job.address])
+  const [addressDetail, setAddressDetail] = React.useState(initialParsed.addressDetail)
+  const [province, setProvince] = React.useState(initialParsed.province)
+  const [amphoe, setAmphoe] = React.useState(initialParsed.amphoe)
+  const [district, setDistrict] = React.useState(initialParsed.district)
+  const [zipcode, setZipcode] = React.useState(initialParsed.zipcode)
+
+  React.useEffect(() => {
+    if (!open) return
+    const parsed = parseThaiAddress(job.address)
+    setAddressDetail(parsed.addressDetail)
+    setProvince(parsed.province)
+    setAmphoe(parsed.amphoe)
+    setDistrict(parsed.district)
+    setZipcode(parsed.zipcode)
+
+    if (thaiDb.length > 0) return
+    let active = true
+    setLoadingThaiDb(true)
+    fetch('https://raw.githubusercontent.com/earthchie/jquery.Thailand.js/master/jquery.Thailand.js/database/raw_database/raw_database.json')
+      .then((res) => res.json())
+      .then((data: ThaiAddressEntry[]) => {
+        if (!active) return
+        setThaiDb(data)
+        setLoadingThaiDb(false)
+      })
+      .catch(() => {
+        if (!active) return
+        setLoadingThaiDb(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [open, job.address, thaiDb.length])
+
+  const provinces = React.useMemo(() => {
+    const set = new Set(thaiDb.map((d) => d.province))
+    if (province && province !== UNKNOWN_VALUE) set.add(province)
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'th'))
+  }, [thaiDb, province])
+
+  const amphoes = React.useMemo(() => {
+    if (!province || province === UNKNOWN_VALUE) return []
+    const set = new Set(thaiDb.filter((d) => d.province === province).map((d) => d.amphoe))
+    if (amphoe && amphoe !== UNKNOWN_VALUE) set.add(amphoe)
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'th'))
+  }, [thaiDb, province, amphoe])
+
+  const districts = React.useMemo(() => {
+    if (!province || province === UNKNOWN_VALUE || !amphoe || amphoe === UNKNOWN_VALUE) return []
+    const list = thaiDb
+      .filter((d) => d.province === province && d.amphoe === amphoe)
+      .sort((a, b) => a.district.localeCompare(b.district, 'th'))
+    if (district && district !== UNKNOWN_VALUE && !list.some((d) => d.district === district)) {
+      list.unshift({ district, amphoe, province, zipcode })
+    }
+    return list
+  }, [thaiDb, province, amphoe, district, zipcode])
+
+  const handleDistrictChange = (selectedDistrict: string) => {
+    setDistrict(selectedDistrict)
+    if (!selectedDistrict || selectedDistrict === UNKNOWN_VALUE) {
+      setZipcode('')
+      return
+    }
+    const found = districts.find((d) => d.district === selectedDistrict)
+    if (found && found.zipcode) {
+      setZipcode(String(found.zipcode))
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -822,11 +942,35 @@ function EditCustomerDialog({
             const f = new FormData(e.currentTarget)
             const rawAppt = String(f.get('appointmentAt') || '').trim()
             const appointmentAt = rawAppt ? new Date(rawAppt).toISOString() : undefined
+
+            const validProvince = province && province !== UNKNOWN_VALUE ? province : ''
+            const validAmphoe = amphoe && amphoe !== UNKNOWN_VALUE ? amphoe : ''
+            const validDistrict = district && district !== UNKNOWN_VALUE ? district : ''
+
+            const isBkk = validProvince === 'กรุงเทพมหานคร'
+            const subdistrictPrefix = isBkk ? 'แขวง' : 'ต.'
+            const districtPrefix = isBkk ? 'เขต' : 'อ.'
+            const provincePrefix = isBkk ? '' : 'จ.'
+
+            const fullAddress = [
+              addressDetail.trim(),
+              validDistrict ? `${subdistrictPrefix}${validDistrict}` : '',
+              validAmphoe ? `${districtPrefix}${validAmphoe}` : '',
+              validProvince ? `${provincePrefix}${validProvince}` : '',
+              zipcode.trim(),
+            ]
+              .filter(Boolean)
+              .join(' ')
+
+            if (!addressDetail.trim() && !validProvince) {
+              return toast.error('กรุณากรอกที่อยู่หรือสถานที่ติดตั้ง')
+            }
+
             const res = await updateJob(job.id, {
               customerName: String(f.get('customerName')),
               phone: String(f.get('phone')),
               contactName: String(f.get('contactName') || ''),
-              address: String(f.get('address') || ''),
+              address: fullAddress,
               urgency: String(f.get('urgency') || job.urgency) as Urgency,
               appointmentAt,
               machineType: String(f.get('machineType')),
@@ -877,9 +1021,93 @@ function EditCustomerDialog({
               <Input id="machineType" name="machineType" defaultValue={job.applianceType || job.machineType} required />
             </Field>
           </div>
-          <Field label="ที่อยู่ / สถานที่ติดตั้ง" htmlFor="address">
-            <Input id="address" name="address" defaultValue={job.address || ''} />
+
+          <Field label="บ้านเลขที่ / ซอย / ถนน / ชื่อสถานที่" htmlFor="edit-addressDetail">
+            <Input
+              id="edit-addressDetail"
+              value={addressDetail}
+              onChange={(e) => setAddressDetail(e.target.value)}
+              placeholder="เช่น 123/4 หมู่ 2 ถ.เพชรเกษม"
+            />
           </Field>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="จังหวัด" htmlFor="edit-province">
+              <select
+                id="edit-province"
+                className="native-select"
+                value={province}
+                disabled={loadingThaiDb}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setProvince(val)
+                  if (val === UNKNOWN_VALUE) {
+                    setAmphoe(UNKNOWN_VALUE)
+                    setDistrict(UNKNOWN_VALUE)
+                  } else {
+                    setAmphoe(UNKNOWN_VALUE)
+                    setDistrict(UNKNOWN_VALUE)
+                  }
+                  setZipcode('')
+                }}
+              >
+                <option value={UNKNOWN_VALUE}>— ไม่ทราบข้อมูล / ข้าม —</option>
+                {provinces.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="อำเภอ / เขต" htmlFor="edit-amphoe">
+              <select
+                id="edit-amphoe"
+                className="native-select"
+                value={amphoe}
+                disabled={loadingThaiDb}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setAmphoe(val)
+                  setDistrict(UNKNOWN_VALUE)
+                  setZipcode('')
+                }}
+              >
+                <option value={UNKNOWN_VALUE}>— ไม่ทราบข้อมูล / ข้าม —</option>
+                {amphoes.map((a) => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="ตำบล / แขวง" htmlFor="edit-district">
+              <select
+                id="edit-district"
+                className="native-select"
+                value={district}
+                disabled={loadingThaiDb}
+                onChange={(e) => handleDistrictChange(e.target.value)}
+              >
+                <option value={UNKNOWN_VALUE}>— ไม่ทราบข้อมูล / ข้าม —</option>
+                {districts.map((d, idx) => (
+                  <option key={`${d.district}-${idx}`} value={d.district}>
+                    {d.district}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="รหัสไปรษณีย์" htmlFor="edit-zipcode">
+              <Input
+                id="edit-zipcode"
+                className="font-ticket"
+                value={zipcode}
+                onChange={(e) => setZipcode(e.target.value)}
+                placeholder="รหัสไปรษณีย์ (ถ้าทราบ)"
+              />
+            </Field>
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label="ยี่ห้อ" htmlFor="brand">
               <Input id="brand" name="brand" defaultValue={job.brand} required />
