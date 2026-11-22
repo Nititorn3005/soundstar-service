@@ -42,6 +42,15 @@ function isAttentionNeeded(job: RepairJob): boolean {
   return isOverdue(job) || getStaleDays(job) >= 2
 }
 
+function formatMachineTitle(job: RepairJob): string {
+  const brand = job.brand?.trim() || ''
+  const model = job.model && job.model.trim() !== '-' ? job.model.trim() : ''
+  const type = job.applianceType?.trim() || ''
+  const main = [brand, model].filter(Boolean).join(' ')
+  if (main && type) return `${main} (${type})`
+  return main || type || '—'
+}
+
 function JobsList() {
   const { jobs: allJobs, currentUser, profileName } = useAppStore()
   const [q, setQ] = React.useState('')
@@ -60,7 +69,7 @@ function JobsList() {
       (!status || j.status === status) &&
       (!onlyAttention || isAttentionNeeded(j)) &&
       (!needle ||
-        [j.jobNo, j.customerName, j.phone, j.brand, j.model, j.serialNo]
+        [j.jobNo, j.customerName, j.phone, j.applianceType, j.brand, j.model, j.serialNo]
           .filter(Boolean)
           .join(' ')
           .toLowerCase()
@@ -111,7 +120,7 @@ function JobsList() {
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="ค้นหาเลขที่ใบงาน ชื่อลูกค้า เบอร์โทร ยี่ห้อ รุ่น S/N"
+            placeholder="ค้นหาเลขที่ใบงาน ชื่อลูกค้า เบอร์โทร ประเภทเครื่อง ยี่ห้อ รุ่น S/N"
             aria-label="ค้นหางานซ่อม"
             className="h-11 bg-card pl-9"
           />
@@ -182,7 +191,7 @@ function JobsList() {
                       <StatusBadge status={j.status} />
                     </div>
                     <p className="mt-2 font-medium">{j.customerName}</p>
-                    <p className="text-sm text-muted-foreground">{j.brand} {j.model} · {j.symptom}</p>
+                    <p className="text-sm text-muted-foreground">{formatMachineTitle(j)} · {j.symptom}</p>
                     <div className="mt-3 flex justify-between border-t border-dashed border-border pt-2 text-xs text-muted-foreground">
                       <span>ช่าง: {j.technicianId ? profileName(j.technicianId) : 'ยังไม่มอบหมาย'}</span>
                       <span className={cn(overdue && 'font-semibold text-destructive')}>
@@ -241,7 +250,7 @@ function JobsList() {
                         <p className="font-ticket text-xs text-muted-foreground">{j.phone}</p>
                       </TableCell>
                       <TableCell className="max-w-64">
-                        <p>{j.brand} {j.model}</p>
+                        <p className="font-medium">{formatMachineTitle(j)}</p>
                         <p className="truncate text-xs text-muted-foreground">{j.symptom}</p>
                       </TableCell>
                       <TableCell className={cn(!j.technicianId && 'text-muted-foreground')}>
