@@ -7,6 +7,7 @@ import {
   Check,
   Copy,
   FileCheck2,
+  FilePlus2,
   FileSearch,
   PackageMinus,
   Pencil,
@@ -685,10 +686,19 @@ function JobView({ job }: { job: RepairJob }) {
             <Panel
               title="ข้อมูลลูกค้าและเครื่อง"
               action={
-                canEditCustomer && !closed ? (
-                  <Button variant="ghost" size="sm" onClick={() => setEditCustomerOpen(true)} className="no-print h-8 text-xs">
-                    <Pencil className="mr-1 size-3.5" /> แก้ไขข้อมูล
-                  </Button>
+                canEditCustomer ? (
+                  <div className="no-print flex flex-wrap items-center gap-1">
+                    <Button asChild variant="outline" size="sm" className="h-8 text-xs">
+                      <Link to="/jobs/new" search={{ fromJobId: job.id }}>
+                        <FilePlus2 className="mr-1 size-3.5" /> สร้างใบงานใหม่ (ลูกค้ารายนี้)
+                      </Link>
+                    </Button>
+                    {!closed && (
+                      <Button variant="ghost" size="sm" onClick={() => setEditCustomerOpen(true)} className="h-8 text-xs">
+                        <Pencil className="mr-1 size-3.5" /> แก้ไขข้อมูล
+                      </Button>
+                    )}
+                  </div>
                 ) : undefined
               }
             >
