@@ -1,4 +1,5 @@
 import * as React from "react";
+import { toast } from "sonner";
 
 import {
   getAppData,
@@ -182,6 +183,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
 
     async changeStatus(id, to, note) {
       const oldJobs = [...jobs];
+      const targetJob = jobs.find((j) => j.id === id);
       const now = new Date().toISOString();
 
       // 🟢 เติม as RepairJob[] ด้านท้ายเพื่อป้องกัน TypeScript Error 100%
@@ -213,6 +215,22 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
           alert(result.error || "เปลี่ยนสถานะไม่สำเร็จ");
           return result;
         }
+
+        // สรุปรายการอะไหล่ที่ตัดสต๊อกเมื่อปิดงานซ่อมเสร็จ (COMPLETED)
+        if (to === "COMPLETED" && targetJob) {
+          if (targetJob.parts && targetJob.parts.length > 0) {
+            const summary = targetJob.parts
+              .map((p) => {
+                const inv = inventory.find((x) => x.id === p.partId);
+                return `${inv?.name || "อะไหล่"} ×${p.qty}`;
+              })
+              .join(", ");
+            toast.info(`สรุปอะไหล่ที่ตัดสต๊อกในใบงาน ${targetJob.jobNo}: ${summary}`);
+          } else {
+            toast.warning(`ใบงาน ${targetJob.jobNo} ปิดงานโดยไม่มีรายการเบิกอะไหล่`);
+          }
+        }
+
         void refresh().catch(() => {});
         return result;
       } catch {
@@ -251,6 +269,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
 
     async moveStock(input) {
       const oldInventory = [...inventory];
+      const targetItem = inventory.find((item) => item.id === input.partId);
 
       const nextInventory = inventory.map((item) => {
         if (item.id !== input.partId) return item;
@@ -267,6 +286,21 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
           alert(result.error || "เบิก/ปรับสต๊อกไม่สำเร็จ");
           return result;
         }
+
+        // แจ้งเตือนทันทีหากเบิก/ปรับสต๊อกแล้วคงเหลือต่ำกว่าจุดสั่งซื้อ
+        if (targetItem && input.type !== "IN") {
+          const threshold =
+            (targetItem as InventoryItem & { minStock?: number; reorderPoint?: number }).minStock ??
+            (targetItem as InventoryItem & { minStock?: number; reorderPoint?: number }).reorderPoint ??
+            2;
+          const remaining = result.value.balanceAfter;
+          if (remaining === 0) {
+            toast.error(`⚠️ อะไหล่หมดสต๊อก: ${targetItem.name} (${targetItem.code}) คงเหลือ 0 ${targetItem.unit}`);
+          } else if (remaining <= threshold) {
+            toast.warning(`⚠️ อะไหล่ใกล้หมด: ${targetItem.name} (${targetItem.code}) คงเหลือ ${remaining} ${targetItem.unit}`);
+          }
+        }
+
         void refresh().catch(() => {});
         return result;
       } catch {
