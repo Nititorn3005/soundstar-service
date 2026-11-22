@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { Camera, History, Loader2, Plus, Save, Trash2, UserCheck, X } from 'lucide-react'
+import { ArrowRight, Camera, Check, CheckCircle2, Copy, History, Loader2, Plus, Save, Trash2, UserCheck, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Field, PageHeader, Panel, RoleGate } from '@/components/app/shell'
@@ -42,12 +42,56 @@ interface JobItemState {
 
 type Errors = Partial<Record<'customerName' | 'phone' | 'address' | 'items' | 'photos', string>>
 
+function buildTechLineMessage(params: {
+  job: RepairJob
+  items: JobItemState[]
+  techName: string
+  note?: string
+}): string {
+  const { job, items, techName, note } = params
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://soundstar-service.netlify.app'
+  const jobUrl = `${origin}/jobs/${job.id}`
+  const urgencyText = URGENCY_LABEL[job.urgency] || 'ปกติ'
+  const apptText = job.appointmentAt ? fmtDateTime(job.appointmentAt) : 'ตามสะดวก / นัดเพิ่ม'
+
+  const machineLines = items.map((item, idx) => {
+    const modelPart = item.model.trim() && item.model.trim() !== '-' ? ` รุ่น ${item.model.trim()}` : ''
+    const snPart = item.serialNumber?.trim() ? ` (S/N: ${item.serialNumber.trim()})` : ''
+    const prefix = items.length > 1 ? `  ${idx + 1}. ` : '  • '
+    return `${prefix}${item.brand.trim()}${modelPart} (${item.applianceType})${snPart}\n     อาการ: ${item.symptom.trim()}`
+  })
+
+  return [
+    `🔧 แจ้งงานซ่อมใหม่ · Hatyai Soundstar`,
+    `เลขที่ใบงาน: ${job.jobNo}`,
+    `ความเร่งด่วน: ${urgencyText} | นัดหมาย: ${apptText}`,
+    `ช่างผู้รับผิดชอบ: ${techName}`,
+    ``,
+    `👤 ลูกค้า: ${job.customerName}`,
+    `📞 โทร: ${job.phone}`,
+    `📍 ที่อยู่: ${job.address}`,
+    ``,
+    `🧺 รายการเครื่องซ่อม (${items.length} เครื่อง):`,
+    ...machineLines,
+    ...(note?.trim() ? [``, `📝 หมายเหตุ: ${note.trim()}`] : []),
+    ``,
+    `🔗 ดูรายละเอียด/อัปเดตงาน: ${jobUrl}`,
+  ].join('\n')
+}
+
 function NewJob() {
   const { createJob, profiles, currentUser, jobs } = useAppStore()
   const navigate = useNavigate()
   const [errors, setErrors] = React.useState<Errors>({})
   const [photos, setPhotos] = React.useState<File[]>([])
   const [pending, setPending] = React.useState(false)
+
+  // เก็บข้อมูลใบงานที่เพิ่งสร้างสำเร็จเพื่อแสดงปุ่มคัดลอกส่ง LINE ช่างทันที
+  const [createdSummary, setCreatedSummary] = React.useState<{
+    job: RepairJob
+    lineText: string
+  } | null>(null)
+  const [copiedLine, setCopiedLine] = React.useState(false)
 
   // ข้อมูลลูกค้า (controlled เพื่อรองรับการดึงประวัติลูกค้าเดิมอัตโนมัติ)
   const [customerName, setCustomerName] = React.useState('')
@@ -192,9 +236,9 @@ function NewJob() {
   // ดึงข้อมูลเครื่องจากประวัติเก่าลงในรายการแจ้งซ่อม
   const applyMachineFromHistory = (pastJob: RepairJob) => {
     const newItem: JobItemState = {
-      applianceType: pastJob.machineType || MACHINE_TYPES[0] || 'เครื่องซักฝาบน',
+      applianceType: pastJob.applianceType || MACHINE_TYPES[0] || 'เครื่องซักฝาบน',
       brand: pastJob.brand || '',
-      model: pastJob.model || '',
+      model: pastJob.model && pastJob.model !== '-' ? pastJob.model : '',
       serialNumber: pastJob.serialNo || '',
       symptom: '',
     }
@@ -204,7 +248,7 @@ function NewJob() {
       }
       return [...prev, newItem]
     })
-    toast.success(`เพิ่มข้อมูลเครื่อง ${pastJob.brand} ${pastJob.model} ลงฟอร์มแล้ว`)
+    toast.success(`เพิ่มข้อมูลเครื่อง ${pastJob.brand} ${pastJob.model || ''} ลงฟอร์มแล้ว`)
   }
 
   // รายการเครื่องแจ้งซ่อม (เริ่มต้น 1 เครื่อง)
@@ -251,6 +295,17 @@ function NewJob() {
     setPhotos((p) => [...p, ...incoming].slice(0, MAX_PHOTOS))
   }
 
+  async function handleCopyLineText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedLine(true)
+      toast.success('คัดลอกข้อความแจ้งช่างแล้ว นำไปวางใน LINE ได้ทันที')
+      setTimeout(() => setCopiedLine(false), 3000)
+    } catch {
+      toast.error('ไม่สามารถคัดลอกอัตโนมัติได้ กรุณากดคัดลอกจากกล่องข้อความ')
+    }
+  }
+
   async function onSubmit(ev: React.FormEvent<HTMLFormElement>) {
     ev.preventDefault()
     if (pending) return
@@ -284,15 +339,15 @@ function NewJob() {
       e.address = 'กรุณาเลือกจังหวัด อำเภอ และตำบลให้ครบถ้วน'
     }
 
-    // ตรวจสอบความถูกต้องของรายการเครื่องซ่อมทุกชิ้น
+    // ตรวจสอบความถูกต้องของรายการเครื่องซ่อมทุกชิ้น (ไม่บังคับกรอกรุ่นแล้ว)
     let hasItemError = false
     items.forEach((item) => {
-      if (!item.brand.trim() || !item.model.trim() || !item.symptom.trim()) {
+      if (!item.brand.trim() || !item.symptom.trim()) {
         hasItemError = true
       }
     })
     if (hasItemError) {
-      e.items = 'กรุณากรอกยี่ห้อ รุ่น และอาการเสีย ของเครื่องแจ้งซ่อมให้ครบถ้วน'
+      e.items = 'กรุณากรอกยี่ห้อ และอาการเสีย ของเครื่องแจ้งซ่อมให้ครบถ้วน'
     }
 
     setErrors(e)
@@ -300,6 +355,9 @@ function NewJob() {
       toast.error(e.items || e.address || 'กรุณาตรวจสอบข้อมูลที่ไฮไลต์')
       return
     }
+
+    const assignedTechId = (isAdmin && v('technicianId')) || undefined
+    const noteText = v('note') || undefined
 
     setPending(true)
     const res = await createJob({
@@ -310,23 +368,35 @@ function NewJob() {
       items: items.map((i) => ({
         applianceType: i.applianceType,
         brand: i.brand.trim(),
-        model: i.model.trim(),
+        model: i.model.trim() || '',
         serialNumber: i.serialNumber?.trim() || undefined,
         purchaseDate: i.purchaseDate || undefined,
         symptom: i.symptom.trim(),
         details: i.details?.trim() || undefined,
       })),
-      technicianId: (isAdmin && v('technicianId')) || undefined,
+      technicianId: assignedTechId,
       appointmentAt: v('appointmentAt') ? new Date(v('appointmentAt')).toISOString() : undefined,
       urgency: v('urgency') as UrgencyLevel,
-      note: v('note') || undefined,
+      note: noteText,
       photos: photos.length,
     })
     setPending(false)
 
     if (!res.ok) return toast.error(res.error)
+
+    const techName = assignedTechId
+      ? profiles.find((p) => p.id === assignedTechId)?.fullName || 'มอบหมายแล้ว'
+      : 'รอมอบหมายช่าง'
+
+    const lineText = buildTechLineMessage({
+      job: res.value,
+      items,
+      techName,
+      note: noteText,
+    })
+
     toast.success(`สร้างใบงาน ${res.value.jobNo} เรียบร้อย (${items.length} เครื่อง)`)
-    navigate({ to: '/jobs/$jobId', params: { jobId: res.value.id } })
+    setCreatedSummary({ job: res.value, lineText })
   }
 
   return (
@@ -336,6 +406,68 @@ function NewJob() {
         title="รับแจ้งงานซ่อม"
         description="เลขที่ใบงานจะถูกสร้างอัตโนมัติเมื่อบันทึก (รองรับการแจ้งซ่อมหลายเครื่องใน 1 ใบงาน)"
       />
+
+      {/* หน้าต่างแจ้งผลสำเร็จ + ปุ่มคัดลอกข้อความแจ้งช่างใน LINE ทันที */}
+      {createdSummary && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="created-job-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs"
+        >
+          <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-xl">
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                <CheckCircle2 className="size-6" />
+              </div>
+              <div>
+                <h2 id="created-job-title" className="text-lg font-bold text-foreground">
+                  บันทึกใบงาน {createdSummary.job.jobNo} สำเร็จ!
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  กดปุ่มด้านล่างเพื่อคัดลอกรายละเอียดงานส่งเข้ากลุ่ม LINE ช่างได้ทันที
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">
+                ตัวอย่างข้อความแจ้งช่าง (สำหรับส่ง LINE)
+              </label>
+              <Textarea
+                readOnly
+                rows={11}
+                value={createdSummary.lineText}
+                className="bg-muted/50 font-sans text-xs leading-relaxed"
+                onFocus={(e) => e.currentTarget.select()}
+              />
+            </div>
+
+            <div className="mt-5 flex flex-col gap-2.5 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                size="lg"
+                className="bg-[#06C755] text-white hover:bg-[#05b34c]"
+                onClick={() => handleCopyLineText(createdSummary.lineText)}
+              >
+                {copiedLine ? <Check className="mr-1.5 size-4" /> : <Copy className="mr-1.5 size-4" />}
+                {copiedLine ? 'คัดลอกข้อความแล้ว!' : 'คัดลอกข้อความแจ้งช่าง (ส่ง LINE)'}
+              </Button>
+              <Button
+                type="button"
+                size="lg"
+                variant="outline"
+                onClick={() =>
+                  navigate({ to: '/jobs/$jobId', params: { jobId: createdSummary.job.id } })
+                }
+              >
+                ไปหน้ารายละเอียดใบงาน <ArrowRight className="ml-1.5 size-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={onSubmit} noValidate className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         <div className="grid gap-6">
           {/* ข้อมูลลูกค้า */}
@@ -430,12 +562,12 @@ function NewJob() {
                         <div>
                           <span className="font-ticket font-bold text-primary">{pj.jobNo}</span>{' '}
                           <span className="font-medium">
-                            {pj.machineType} {pj.brand} {pj.model}
+                            {pj.applianceType} {pj.brand} {pj.model && pj.model !== '-' ? pj.model : ''}
                           </span>
                           {pj.serialNo ? <span className="font-ticket text-muted-foreground"> (S/N: {pj.serialNo})</span> : null}
                           <p className="text-[11px] text-muted-foreground">
                             วันที่ {fmtDateTime(pj.receivedAt)} · อาการ: {pj.symptom}
-                            {pj.result ? ` · ผล: ${pj.result}` : ''}
+                            {pj.resolution ? ` · ผล: ${pj.resolution}` : ''}
                           </p>
                         </div>
                         <Button
@@ -602,10 +734,11 @@ function NewJob() {
                         </datalist>
                       </Field>
 
-                      <Field label="รุ่น" htmlFor={`model-${index}`} required>
+                      <Field label="รุ่น" htmlFor={`model-${index}`} hint="ถ้ามี / ไม่บังคับกรอก">
                         <Input
                           id={`model-${index}`}
                           className="h-11 font-ticket"
+                          placeholder="ไม่ทราบรุ่นเว้นว่างได้"
                           value={item.model}
                           onChange={(e) => handleItemChange(index, 'model', e.target.value)}
                         />
