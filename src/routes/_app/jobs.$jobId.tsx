@@ -80,6 +80,9 @@ interface NormalizedJobItem {
   purchaseDate?: string
   symptom: string
   details?: string
+  diagnosis?: string
+  resolution?: string
+  result?: string
 }
 
 export const Route = createFileRoute('/_app/jobs/$jobId')({
@@ -111,6 +114,9 @@ function getJobItems(job: RepairJob): NormalizedJobItem[] {
       purchaseDate: item.purchaseDate ? String(item.purchaseDate) : undefined,
       symptom: String(item.symptom ?? ''),
       details: item.details ? String(item.details) : undefined,
+      diagnosis: item.diagnosis ? String(item.diagnosis) : idx === 0 ? job.diagnosis : undefined,
+      resolution: item.resolution ? String(item.resolution) : idx === 0 ? job.resolution : undefined,
+      result: item.result ? String(item.result) : idx === 0 ? job.result : undefined,
     }))
   }
   return [
@@ -122,6 +128,9 @@ function getJobItems(job: RepairJob): NormalizedJobItem[] {
       serialNo: job.serialNo,
       symptom: job.symptom || '—',
       details: job.details,
+      diagnosis: job.diagnosis,
+      resolution: job.resolution,
+      result: job.result,
     },
   ]
 }
@@ -592,15 +601,21 @@ function JobView({ job }: { job: RepairJob }) {
           </div>
 
           <div className="mt-2.5 border border-black p-3 text-[12px]">
-            <h2 className="border-b border-black pb-1 text-[13.5px] font-bold">ข้อมูลลูกค้าและเครื่องซ่อม ({jobItems.length} เครื่อง)</h2>
+            <h2 className="border-b border-black pb-1 text-[13.5px] font-bold">ข้อมูลลูกค้า</h2>
             <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
               <p><span className="font-semibold">ชื่อลูกค้า:</span> <span className="font-bold text-[14px]">{job.customerName}</span></p>
               <p><span className="font-semibold">เบอร์โทรศัพท์:</span> <span className="font-bold">{job.phone}</span></p>
               <p className="col-span-2"><span className="font-semibold">ที่อยู่:</span> {job.address}</p>
             </div>
-            <div className="mt-2 space-y-1.5 border-t border-gray-300 pt-2">
+          </div>
+
+          <div className="mt-2.5 border border-black p-3 text-[12px]">
+            <h2 className="border-b border-black pb-1 text-[13.5px] font-bold">
+              รายละเอียดเครื่องซ่อมและผลการดำเนินการ ({jobItems.length} เครื่อง)
+            </h2>
+            <div className="mt-2 space-y-2.5">
               {jobItems.map((it, idx) => (
-                <div key={it.id} className={cn(idx > 0 && 'border-t border-dashed border-gray-300 pt-1')}>
+                <div key={it.id} className={cn(idx > 0 && 'border-t border-dashed border-gray-400 pt-2')}>
                   <p>
                     {jobItems.length > 1 && <span className="font-bold">เครื่องที่ {idx + 1}: </span>}
                     <span className="font-semibold">ประเภท:</span> {it.machineType} ·{' '}
@@ -608,17 +623,11 @@ function JobView({ job }: { job: RepairJob }) {
                     {it.serialNo && it.serialNo !== '-' ? `(S/N: ${it.serialNo})` : ''}
                   </p>
                   <p><span className="font-semibold">อาการเสียที่แจ้ง:</span> {it.symptom}</p>
+                  <p><span className="font-semibold">ผลการตรวจสอบ:</span> {it.diagnosis || '—'}</p>
+                  <p><span className="font-semibold">วิธีแก้ไข:</span> {it.resolution || '—'}</p>
+                  <p><span className="font-semibold">ผลการซ่อม:</span> <span className="font-bold">{it.result || '—'}</span></p>
                 </div>
               ))}
-            </div>
-          </div>
-
-          <div className="mt-2.5 border border-black p-3 text-[12px]">
-            <h2 className="border-b border-black pb-1 text-[13.5px] font-bold">รายละเอียดผลการตรวจเช็กและการซ่อม</h2>
-            <div className="mt-2 space-y-2">
-              <p><span className="font-semibold">ผลการตรวจสอบ:</span> {job.diagnosis || '—'}</p>
-              <p><span className="font-semibold">วิธีแก้ไข:</span> {job.resolution || '—'}</p>
-              <p><span className="font-semibold">ผลการซ่อม:</span> <span className="font-bold">{job.result || '—'}</span></p>
             </div>
 
             {job.parts.length > 0 && (
@@ -822,7 +831,7 @@ function JobView({ job }: { job: RepairJob }) {
               </div>
             </Panel>
 
-            <RepairNotes job={job} editable={canWork && !closed} />
+            <RepairNotes job={job} items={jobItems} editable={canWork && !closed} />
 
             <Panel title="อะไหล่ที่ใช้">
               {job.parts.length === 0 ? (
@@ -923,7 +932,7 @@ function JobView({ job }: { job: RepairJob }) {
 
       <CallLogDialog job={job} open={callLogOpen} onOpenChange={setCallLogOpen} />
       <EditCustomerDialog job={job} open={editCustomerOpen} onOpenChange={setEditCustomerOpen} />
-      <StatusDialog job={job} options={next} open={statusOpen} onOpenChange={setStatusOpen} />
+      <StatusDialog job={job} items={jobItems} options={next} open={statusOpen} onOpenChange={setStatusOpen} />
       <IssuePartDialog job={job} open={partOpen} onOpenChange={setPartOpen} />
     </div>
   )
@@ -1013,62 +1022,187 @@ function CallLogDialog({
   )
 }
 
-function RepairNotes({ job, editable }: { job: RepairJob; editable: boolean }) {
+function RepairNotes({
+  job,
+  items,
+  editable,
+}: {
+  job: RepairJob
+  items: NormalizedJobItem[]
+  editable: boolean
+}) {
   const { updateJob } = useAppStore()
-  const hasCustomResult = Boolean(job.result && !REPAIR_RESULT_OPTIONS.includes(job.result))
+  const [saving, setSaving] = React.useState(false)
+  const [notesByItem, setNotesByItem] = React.useState<
+    Record<string, { diagnosis: string; resolution: string; result: string }>
+  >({})
+
+  React.useEffect(() => {
+    const initial: Record<string, { diagnosis: string; resolution: string; result: string }> = {}
+    for (const it of items) {
+      initial[it.id] = {
+        diagnosis: it.diagnosis ?? '',
+        resolution: it.resolution ?? '',
+        result: it.result ?? '',
+      }
+    }
+    setNotesByItem(initial)
+  }, [items])
+
+  const updateField = (itemId: string, field: 'diagnosis' | 'resolution' | 'result', value: string) => {
+    setNotesByItem((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...(prev[itemId] ?? { diagnosis: '', resolution: '', result: '' }),
+        [field]: value,
+      },
+    }))
+  }
 
   return (
-    <Panel title="ผลการตรวจสอบและการซ่อม">
+    <Panel title={items.length > 1 ? `ผลการตรวจสอบและการซ่อม (${items.length} เครื่อง)` : 'ผลการตรวจสอบและการซ่อม'}>
       <form
         className="grid gap-4"
         onSubmit={async (e) => {
           e.preventDefault()
-          const f = new FormData(e.currentTarget)
-          const res = await updateJob(job.id, {
-            diagnosis: String(f.get('diagnosis')),
-            resolution: String(f.get('resolution')),
-            result: String(f.get('result')),
-          })
-          if (res.ok) toast.success('บันทึกผลการซ่อมแล้ว')
-          else toast.error(res.error)
+          setSaving(true)
+          try {
+            const itemResults = items.map((it) => {
+              const entry = notesByItem[it.id] ?? { diagnosis: '', resolution: '', result: '' }
+              return {
+                id: it.id,
+                diagnosis: entry.diagnosis.trim() || null,
+                resolution: entry.resolution.trim() || null,
+                result: entry.result.trim() || null,
+              }
+            })
+
+            const summaryDiagnosis =
+              items.length > 1
+                ? items
+                    .map((it, i) => {
+                      const d = notesByItem[it.id]?.diagnosis?.trim()
+                      return d ? `เครื่องที่ ${i + 1} (${it.machineType}): ${d}` : ''
+                    })
+                    .filter(Boolean)
+                    .join('\n') || null
+                : itemResults[0]?.diagnosis ?? null
+
+            const summaryResolution =
+              items.length > 1
+                ? items
+                    .map((it, i) => {
+                      const r = notesByItem[it.id]?.resolution?.trim()
+                      return r ? `เครื่องที่ ${i + 1} (${it.machineType}): ${r}` : ''
+                    })
+                    .filter(Boolean)
+                    .join('\n') || null
+                : itemResults[0]?.resolution ?? null
+
+            const summaryResult =
+              items.length > 1
+                ? items
+                    .map((it, i) => {
+                      const res = notesByItem[it.id]?.result?.trim()
+                      return res ? `เครื่องที่ ${i + 1}: ${res}` : ''
+                    })
+                    .filter(Boolean)
+                    .join(' | ') || null
+                : itemResults[0]?.result ?? null
+
+            const res = await updateJob(job.id, {
+              diagnosis: summaryDiagnosis,
+              resolution: summaryResolution,
+              result: summaryResult,
+              itemResults,
+            } as Record<string, unknown>)
+
+            if (res.ok) toast.success('บันทึกผลการซ่อมครบทุกเครื่องแล้ว')
+            else toast.error(res.error)
+          } finally {
+            setSaving(false)
+          }
         }}
       >
-        {editable ? (
-          <>
-            <Field label="ผลการตรวจสอบ" htmlFor="diagnosis">
-              <Textarea id="diagnosis" name="diagnosis" defaultValue={job.diagnosis} rows={2} />
-            </Field>
-            <Field label="วิธีแก้ไข" htmlFor="resolution">
-              <Textarea id="resolution" name="resolution" defaultValue={job.resolution} rows={2} />
-            </Field>
-            <Field label="ผลการซ่อม" htmlFor="result">
-              <select
-                id="result"
-                name="result"
-                className="native-select"
-                defaultValue={job.result ?? ''}
-              >
-                <option value="">— เลือกผลการซ่อม —</option>
-                {hasCustomResult && (
-                  <option value={job.result}>{job.result}</option>
-                )}
-                {REPAIR_RESULT_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Button type="submit" variant="outline" className="no-print w-fit">
-              <Save /> บันทึกผล
-            </Button>
-          </>
-        ) : (
-          <>
-            <Item label="ผลการตรวจสอบ" value={job.diagnosis} />
-            <Item label="วิธีแก้ไข" value={job.resolution} />
-            <Item label="ผลการซ่อม" value={job.result} />
-          </>
+        {items.map((it, idx) => {
+          const entry = notesByItem[it.id] ?? {
+            diagnosis: it.diagnosis ?? '',
+            resolution: it.resolution ?? '',
+            result: it.result ?? '',
+          }
+          const hasCustomResult = Boolean(entry.result && !REPAIR_RESULT_OPTIONS.includes(entry.result))
+
+          return (
+            <div
+              key={it.id}
+              className={cn(
+                'grid gap-3',
+                items.length > 1 && 'rounded-xl border border-border/80 bg-muted/20 p-3',
+              )}
+            >
+              {items.length > 1 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-1.5">
+                  <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
+                    เครื่องที่ {idx + 1}: {it.machineType} ({formatBrandModel(it)})
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">อาการ: {it.symptom}</span>
+                </div>
+              )}
+
+              {editable ? (
+                <>
+                  <Field label="ผลการตรวจสอบ" htmlFor={`diagnosis-${it.id}`}>
+                    <Textarea
+                      id={`diagnosis-${it.id}`}
+                      value={entry.diagnosis}
+                      onChange={(e) => updateField(it.id, 'diagnosis', e.target.value)}
+                      rows={2}
+                      placeholder="ระบุสาเหตุหรืออาการเสียที่ตรวจพบ..."
+                    />
+                  </Field>
+                  <Field label="วิธีแก้ไข" htmlFor={`resolution-${it.id}`}>
+                    <Textarea
+                      id={`resolution-${it.id}`}
+                      value={entry.resolution}
+                      onChange={(e) => updateField(it.id, 'resolution', e.target.value)}
+                      rows={2}
+                      placeholder="ระบุขั้นตอนการซ่อมหรือการเปลี่ยนอะไหล่..."
+                    />
+                  </Field>
+                  <Field label="ผลการซ่อม" htmlFor={`result-${it.id}`}>
+                    <select
+                      id={`result-${it.id}`}
+                      className="native-select"
+                      value={entry.result}
+                      onChange={(e) => updateField(it.id, 'result', e.target.value)}
+                    >
+                      <option value="">— เลือกผลการซ่อม —</option>
+                      {hasCustomResult && (
+                        <option value={entry.result}>{entry.result}</option>
+                      )}
+                      {REPAIR_RESULT_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </>
+              ) : (
+                <>
+                  <Item label="ผลการตรวจสอบ" value={it.diagnosis} />
+                  <Item label="วิธีแก้ไข" value={it.resolution} />
+                  <Item label="ผลการซ่อม" value={it.result} />
+                </>
+              )}
+            </div>
+          )
+        })}
+
+        {editable && (
+          <Button type="submit" variant="outline" disabled={saving} className="no-print w-fit">
+            <Save /> {saving ? 'กำลังบันทึก...' : items.length > 1 ? 'บันทึกผลซ่อมทั้งหมด' : 'บันทึกผล'}
+          </Button>
         )}
       </form>
     </Panel>
@@ -1399,18 +1533,21 @@ function EditCustomerDialog({
 
 function StatusDialog({
   job,
+  items,
   options,
   open,
   onOpenChange,
 }: {
   job: RepairJob
+  items: NormalizedJobItem[]
   options: JobStatus[]
   open: boolean
   onOpenChange: (v: boolean) => void
 }) {
   const { changeStatus } = useAppStore()
   const [to, setTo] = React.useState<JobStatus | ''>('')
-  const missingRepairNotes = !job.diagnosis?.trim() && !job.resolution?.trim() && !job.result?.trim()
+  const hasAnyItemNotes = items.some((it) => Boolean(it.diagnosis?.trim() || it.resolution?.trim() || it.result?.trim()))
+  const missingRepairNotes = !job.diagnosis?.trim() && !job.resolution?.trim() && !job.result?.trim() && !hasAnyItemNotes
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
