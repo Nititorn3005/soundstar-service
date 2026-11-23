@@ -168,12 +168,17 @@ export function toJob(r: Row, parts: JobPart[]): RepairJob {
 
   const baseBm = splitBrandModel(r)
 
-  // แปลงรายการเครื่องซ่อมทั้งหมด (รองรับทั้ง 1 เครื่องและหลายเครื่อง)
+  // แปลงรายการเครื่องซ่อมทั้งหมด พร้อมผลการตรวจสอบ/วิธีแก้ไข/ผลการซ่อมของแต่ละเครื่อง
   const rawItems = Array.isArray(r.repair_job_items) ? (r.repair_job_items as Row[]) : []
+  const sortedRawItems = [...rawItems].sort((a, b) =>
+    String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')),
+  )
+
   const items =
-    rawItems.length > 0
-      ? rawItems.map((item) => ({
+    sortedRawItems.length > 0
+      ? sortedRawItems.map((item, idx) => ({
           id: String(item.id ?? crypto.randomUUID()),
+          isDbItem: Boolean(item.id),
           applianceType: String(item.appliance_type ?? r.appliance_type ?? ''),
           machineType: String(item.appliance_type ?? r.appliance_type ?? ''),
           brand: String(item.brand ?? ''),
@@ -183,10 +188,14 @@ export function toJob(r: Row, parts: JobPart[]): RepairJob {
           purchaseDate: str(item.purchase_date),
           symptom: String(item.symptom ?? ''),
           details: str(item.details),
+          diagnosis: str(item.diagnosis) ?? (idx === 0 ? str(r.diagnosis) : undefined),
+          resolution: str(item.resolution) ?? (idx === 0 ? str(r.resolution) : undefined),
+          result: str(item.result) ?? (idx === 0 ? str(r.result) : undefined),
         }))
       : [
           {
             id: `${r.id}-item-1`,
+            isDbItem: false,
             applianceType: r.appliance_type ?? '',
             machineType: r.appliance_type ?? '',
             brand: baseBm.brand,
@@ -196,6 +205,9 @@ export function toJob(r: Row, parts: JobPart[]): RepairJob {
             purchaseDate: str(r.purchase_date),
             symptom: r.symptom ?? '',
             details: str(r.details),
+            diagnosis: str(r.diagnosis),
+            resolution: str(r.resolution),
+            result: str(r.result),
           },
         ]
 
