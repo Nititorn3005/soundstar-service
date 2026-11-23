@@ -42,7 +42,7 @@ async function viewerWithRole(roles?: Role[]) {
 async function loadJob(id: string): Promise<RepairJob | null> {
   const { data, error } = await supabaseAdmin()
     .from("repair_jobs")
-    .select("*, repair_job_history(*), repair_job_photos(id)")
+    .select("*, repair_job_history(*), repair_job_photos(id), repair_job_items(*)")
     .eq("id", id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -80,7 +80,7 @@ export const getAppData = createServerFn({ method: "GET" }).handler(
           .order("full_name"),
         admin
           .from("repair_jobs")
-          .select("*, repair_job_history(*), repair_job_photos(id)")
+          .select("*, repair_job_history(*), repair_job_photos(id), repair_job_items(*)")
           .is("deleted_at", null)
           .order("created_at", { ascending: false }),
         admin
