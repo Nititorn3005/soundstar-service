@@ -65,10 +65,21 @@ const CALL_LOG_TEMPLATES = [
 const UNKNOWN_VALUE = '__UNKNOWN__'
 
 interface ThaiAddressEntry {
-  district: string // ตำบล/แขวง
-  amphoe: string // อำเภอ/เขต
-  province: string // จังหวัด
+  district: string
+  amphoe: string
+  province: string
   zipcode: number | string
+}
+
+interface NormalizedJobItem {
+  id: string
+  machineType: string
+  brand: string
+  model: string
+  serialNo?: string
+  purchaseDate?: string
+  symptom: string
+  details?: string
 }
 
 export const Route = createFileRoute('/_app/jobs/$jobId')({
@@ -82,10 +93,37 @@ function cleanModel(model?: string): string {
   return trimmed === '-' ? '' : trimmed
 }
 
-function formatBrandModel(job: RepairJob): string {
+function formatBrandModel(job: { brand?: string; model?: string }): string {
   const brand = job.brand?.trim() || ''
   const model = cleanModel(job.model)
   return [brand, model].filter(Boolean).join(' ') || '—'
+}
+
+function getJobItems(job: RepairJob): NormalizedJobItem[] {
+  const rawItems = (job as RepairJob & { items?: Array<Record<string, unknown>> }).items
+  if (Array.isArray(rawItems) && rawItems.length > 0) {
+    return rawItems.map((item, idx) => ({
+      id: String(item.id ?? `${job.id}-item-${idx}`),
+      machineType: String(item.machineType ?? item.applianceType ?? job.machineType ?? '—'),
+      brand: String(item.brand ?? ''),
+      model: String(item.model ?? ''),
+      serialNo: item.serialNo ? String(item.serialNo) : item.serialNumber ? String(item.serialNumber) : undefined,
+      purchaseDate: item.purchaseDate ? String(item.purchaseDate) : undefined,
+      symptom: String(item.symptom ?? ''),
+      details: item.details ? String(item.details) : undefined,
+    }))
+  }
+  return [
+    {
+      id: `${job.id}-item-0`,
+      machineType: job.applianceType || job.machineType || '—',
+      brand: job.brand || '',
+      model: job.model || '',
+      serialNo: job.serialNo,
+      symptom: job.symptom || '—',
+      details: job.details,
+    },
+  ]
 }
 
 function getElapsedRepairInfo(job: RepairJob): { days: number; label: string; tone: 'normal' | 'warn' | 'danger' | 'done' } {
@@ -214,8 +252,7 @@ function JobView({ job }: { job: RepairJob }) {
   const canEditCustomer = role === 'ADMIN' || role === 'FRONT'
   const closed = job.status === 'COMPLETED' || job.status === 'CANCELLED'
   const brandLabel = job.brand?.trim() || 'ผู้ผลิต'
-  const machineTypeLabel = job.applianceType || job.machineType || '—'
-  const brandModelText = formatBrandModel(job)
+  const jobItems = React.useMemo(() => getJobItems(job), [job])
   const elapsedInfo = getElapsedRepairInfo(job)
 
   const historyList =
@@ -244,10 +281,20 @@ function JobView({ job }: { job: RepairJob }) {
     const jobUrl = `${origin}/jobs/${job.id}`
     const techText = job.technicianId ? profileName(job.technicianId) : 'รอมอบหมายช่าง'
     const apptText = job.appointmentAt ? fmtDateTime(job.appointmentAt) : 'ตามสะดวก / นัดเพิ่ม'
-    const snPart = job.serialNo && job.serialNo.trim() !== '-' ? ` (S/N: ${job.serialNo.trim()})` : ''
+
+    const itemsLines = jobItems.flatMap((it, idx) => {
+      const bm = formatBrandModel(it)
+      const snPart = it.serialNo && it.serialNo.trim() !== '-' ? ` (S/N: ${it.serialNo.trim()})` : ''
+      const prefix = jobItems.length > 1 ? `เครื่องที่ ${idx + 1}: ` : 'เครื่องซ่อม: '
+      return [
+        `🧺 ${prefix}${bm} (${it.machineType})${snPart}`,
+        `⚠️ อาการเสีย: ${it.symptom}`,
+        ...(it.details ? [`📋 รายละเอียด: ${it.details}`] : []),
+      ]
+    })
 
     const message = [
-      `🔧 แจ้งงานซ่อม · Hatyai Soundstar`,
+      `🔧 แจ้งงานซ่อม · Hatyai Soundstar${jobItems.length > 1 ? ` (${jobItems.length} เครื่อง)` : ''}`,
       `เลขที่ใบงาน: ${job.jobNo} (${STATUS_LABEL[job.status]} · ${elapsedInfo.label})`,
       `ความเร่งด่วน: ${URGENCY_LABEL[job.urgency]} | นัดหมาย: ${apptText}`,
       `ช่างผู้รับผิดชอบ: ${techText}`,
@@ -256,10 +303,8 @@ function JobView({ job }: { job: RepairJob }) {
       `📞 โทร: ${job.phone}`,
       `📍 ที่อยู่: ${job.address}`,
       ``,
-      `🧺 เครื่องซ่อม: ${brandModelText} (${machineTypeLabel})${snPart}`,
-      `⚠️ อาการเสีย: ${job.symptom}`,
-      ...(job.details ? [`📋 รายละเอียด: ${job.details}`] : []),
-      ...(job.note ? [`📝 หมายเหตุ: ${job.note}`] : []),
+      ...itemsLines,
+      ...(job.note ? [``, `📝 หมายเหตุ: ${job.note}`] : []),
       ``,
       `🔗 ดูรายละเอียด/อัปเดตงาน: ${jobUrl}`,
     ].join('\n')
@@ -371,47 +416,49 @@ function JobView({ job }: { job: RepairJob }) {
             </div>
           </div>
 
-          <div className="mt-2 grid grid-cols-2 gap-2.5">
-            <div className="border border-black p-2.5">
-              <h2 className="border-b border-black pb-1 text-[13px] font-bold">1. ข้อมูลลูกค้าและสถานที่ปฏิบัติงาน</h2>
-              <div className="mt-1.5 space-y-1 text-[12px] leading-snug">
-                <p>
-                  <span className="font-semibold">ชื่อลูกค้า:</span>{' '}
-                  <span className="text-[14px] font-bold">{job.customerName}</span>
-                </p>
-                <p>
-                  <span className="font-semibold">เบอร์โทรศัพท์:</span>{' '}
-                  <span className="text-[14px] font-bold">{job.phone}</span>
-                  {job.contactName ? <span className="ml-2">(ติดต่อ: {job.contactName})</span> : null}
-                </p>
-                <p>
-                  <span className="font-semibold">ที่อยู่ / สถานที่ติดตั้ง:</span> {job.address}
-                </p>
-              </div>
+          <div className="mt-2 border border-black p-2.5">
+            <h2 className="border-b border-black pb-1 text-[13px] font-bold">1. ข้อมูลลูกค้าและสถานที่ปฏิบัติงาน</h2>
+            <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] leading-snug">
+              <p>
+                <span className="font-semibold">ชื่อลูกค้า:</span>{' '}
+                <span className="text-[14px] font-bold">{job.customerName}</span>
+              </p>
+              <p>
+                <span className="font-semibold">เบอร์โทรศัพท์:</span>{' '}
+                <span className="text-[14px] font-bold">{job.phone}</span>
+                {job.contactName ? <span className="ml-2">(ติดต่อ: {job.contactName})</span> : null}
+              </p>
+              <p className="col-span-2">
+                <span className="font-semibold">ที่อยู่ / สถานที่ติดตั้ง:</span> {job.address}
+              </p>
             </div>
+          </div>
 
-            <div className="border border-black p-2.5">
-              <h2 className="border-b border-black pb-1 text-[13px] font-bold">2. ข้อมูลเครื่องซ่อมและอาการเสีย</h2>
-              <div className="mt-1.5 space-y-1 text-[12px] leading-snug">
-                <p>
-                  <span className="font-semibold">ประเภทเครื่อง:</span> <span className="font-bold">{machineTypeLabel}</span>
-                </p>
-                <p>
-                  <span className="font-semibold">ยี่ห้อ / รุ่น:</span>{' '}
-                  <span className="font-bold">{brandModelText}</span>
-                  {job.serialNo && job.serialNo !== '-' ? <span className="ml-2">· S/N: {job.serialNo}</span> : null}
-                </p>
-                <p>
-                  <span className="font-semibold">อาการเสียที่แจ้ง:</span>{' '}
-                  <span className="font-bold underline">{job.symptom}</span>
-                </p>
-                {(job.details || job.note) && (
-                  <p className="text-[11px]">
-                    <span className="font-semibold">เพิ่มเติม/หมายเหตุ:</span>{' '}
-                    {[job.details, job.note].filter(Boolean).join(' · ')}
+          <div className="mt-2 border border-black p-2.5">
+            <h2 className="border-b border-black pb-1 text-[13px] font-bold">
+              2. ข้อมูลเครื่องซ่อมและอาการเสีย ({jobItems.length} เครื่อง)
+            </h2>
+            <div className="mt-1.5 space-y-2 text-[12px] leading-snug">
+              {jobItems.map((it, idx) => (
+                <div key={it.id} className={cn(idx > 0 && 'border-t border-dashed border-gray-400 pt-1.5')}>
+                  <p>
+                    {jobItems.length > 1 && <span className="font-bold">เครื่องที่ {idx + 1}: </span>}
+                    <span className="font-semibold">ประเภท:</span> <span className="font-bold">{it.machineType}</span> ·{' '}
+                    <span className="font-semibold">ยี่ห้อ/รุ่น:</span> <span className="font-bold">{formatBrandModel(it)}</span>
+                    {it.serialNo && it.serialNo !== '-' ? <span className="ml-2">· S/N: {it.serialNo}</span> : null}
                   </p>
-                )}
-              </div>
+                  <p>
+                    <span className="font-semibold">อาการเสียที่แจ้ง:</span>{' '}
+                    <span className="font-bold underline">{it.symptom}</span>
+                    {it.details ? <span className="ml-2 text-[11px]">({it.details})</span> : null}
+                  </p>
+                </div>
+              ))}
+              {job.note && (
+                <p className="border-t border-gray-300 pt-1 text-[11px]">
+                  <span className="font-semibold">หมายเหตุใบงาน:</span> {job.note}
+                </p>
+              )}
             </div>
           </div>
 
@@ -545,14 +592,24 @@ function JobView({ job }: { job: RepairJob }) {
           </div>
 
           <div className="mt-2.5 border border-black p-3 text-[12px]">
-            <h2 className="border-b border-black pb-1 text-[13.5px] font-bold">ข้อมูลลูกค้าและเครื่องซ่อม</h2>
+            <h2 className="border-b border-black pb-1 text-[13.5px] font-bold">ข้อมูลลูกค้าและเครื่องซ่อม ({jobItems.length} เครื่อง)</h2>
             <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
               <p><span className="font-semibold">ชื่อลูกค้า:</span> <span className="font-bold text-[14px]">{job.customerName}</span></p>
               <p><span className="font-semibold">เบอร์โทรศัพท์:</span> <span className="font-bold">{job.phone}</span></p>
               <p className="col-span-2"><span className="font-semibold">ที่อยู่:</span> {job.address}</p>
-              <p><span className="font-semibold">ประเภทเครื่อง:</span> {machineTypeLabel}</p>
-              <p><span className="font-semibold">ยี่ห้อ / รุ่น:</span> {brandModelText} {job.serialNo && job.serialNo !== '-' ? `(S/N: ${job.serialNo})` : ''}</p>
-              <p className="col-span-2"><span className="font-semibold">อาการเสียที่แจ้ง:</span> {job.symptom}</p>
+            </div>
+            <div className="mt-2 space-y-1.5 border-t border-gray-300 pt-2">
+              {jobItems.map((it, idx) => (
+                <div key={it.id} className={cn(idx > 0 && 'border-t border-dashed border-gray-300 pt-1')}>
+                  <p>
+                    {jobItems.length > 1 && <span className="font-bold">เครื่องที่ {idx + 1}: </span>}
+                    <span className="font-semibold">ประเภท:</span> {it.machineType} ·{' '}
+                    <span className="font-semibold">ยี่ห้อ / รุ่น:</span> {formatBrandModel(it)}{' '}
+                    {it.serialNo && it.serialNo !== '-' ? `(S/N: ${it.serialNo})` : ''}
+                  </p>
+                  <p><span className="font-semibold">อาการเสียที่แจ้ง:</span> {it.symptom}</p>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -698,7 +755,7 @@ function JobView({ job }: { job: RepairJob }) {
         <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
           <div className="grid gap-4">
             <Panel
-              title="ข้อมูลลูกค้าและเครื่อง"
+              title="ข้อมูลลูกค้าและสถานที่"
               action={
                 canEditCustomer ? (
                   <div className="no-print flex flex-wrap items-center gap-1">
@@ -720,12 +777,7 @@ function JobView({ job }: { job: RepairJob }) {
                 <Item label="เบอร์โทรศัพท์" value={<a href={`tel:${job.phone}`} className="font-ticket text-primary hover:underline">{job.phone}</a>} />
                 <Item label="ผู้ติดต่อ" value={job.contactName} />
                 <Item label="ที่อยู่ / สถานที่ติดตั้ง" value={job.address} wide />
-                <Item label="ประเภทเครื่อง" value={machineTypeLabel} />
-                <Item label="ยี่ห้อ / รุ่น" value={brandModelText} />
-                <Item label="หมายเลขเครื่อง" value={job.serialNo && job.serialNo !== '-' ? <span className="font-ticket">{job.serialNo}</span> : undefined} />
-                <Item label="วันที่นัดหมาย" value={job.appointmentAt ? <span className={cn(isOverdue(job) && 'font-semibold text-destructive')}>{fmtDateTime(job.appointmentAt)}{isOverdue(job) && ' (เกินนัด)'}</span> : undefined} />
-                <Item label="อาการเสีย" value={job.symptom} wide />
-                <Item label="รายละเอียดเพิ่มเติม" value={job.details} wide />
+                <Item label="วันที่นัดหมาย" value={job.appointmentAt ? <span className={cn(isOverdue(job) && 'font-semibold text-destructive')}>{fmtDateTime(job.appointmentAt)}{isOverdue(job) && ' (เกินนัด)'}</span> : undefined} wide />
                 <Item label="หมายเหตุ" value={job.note} wide />
               </dl>
               {job.photos > 0 && (
@@ -733,6 +785,41 @@ function JobView({ job }: { job: RepairJob }) {
                   <Camera className="size-4" /> รูปภาพประกอบ {job.photos} รูป
                 </p>
               )}
+            </Panel>
+
+            <Panel title={`รายการเครื่องซ่อม (${jobItems.length} เครื่อง)`}>
+              <div className="grid gap-3">
+                {jobItems.map((it, idx) => (
+                  <div
+                    key={it.id}
+                    className={cn(
+                      'rounded-xl border border-border/80 bg-muted/25 p-3',
+                      jobItems.length > 1 && 'relative',
+                    )}
+                  >
+                    {jobItems.length > 1 && (
+                      <div className="mb-2 flex items-center justify-between border-b border-border/60 pb-1.5">
+                        <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-bold text-primary">
+                          เครื่องที่ {idx + 1} / {jobItems.length}
+                        </span>
+                        <span className="text-[11px] font-medium text-muted-foreground">{it.machineType}</span>
+                      </div>
+                    )}
+                    <dl className="grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
+                      <Item label="ประเภทเครื่อง" value={it.machineType} />
+                      <Item label="ยี่ห้อ / รุ่น" value={formatBrandModel(it)} />
+                      {it.serialNo && it.serialNo !== '-' && (
+                        <Item label="หมายเลขเครื่อง (S/N)" value={<span className="font-ticket">{it.serialNo}</span>} />
+                      )}
+                      {it.purchaseDate && (
+                        <Item label="วันที่ซื้อ / ประกัน" value={it.purchaseDate} />
+                      )}
+                      <Item label="อาการเสีย" value={<span className="font-semibold text-foreground">{it.symptom}</span>} wide />
+                      {it.details && <Item label="รายละเอียดเพิ่มเติม" value={it.details} wide />}
+                    </dl>
+                  </div>
+                ))}
+              </div>
             </Panel>
 
             <RepairNotes job={job} editable={canWork && !closed} />
@@ -1219,13 +1306,8 @@ function EditCustomerDialog({
                 onChange={(e) => {
                   const val = e.target.value
                   setProvince(val)
-                  if (val === UNKNOWN_VALUE) {
-                    setAmphoe(UNKNOWN_VALUE)
-                    setDistrict(UNKNOWN_VALUE)
-                  } else {
-                    setAmphoe(UNKNOWN_VALUE)
-                    setDistrict(UNKNOWN_VALUE)
-                  }
+                  setAmphoe(UNKNOWN_VALUE)
+                  setDistrict(UNKNOWN_VALUE)
                   setZipcode('')
                 }}
               >
