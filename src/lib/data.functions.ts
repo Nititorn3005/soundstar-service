@@ -257,12 +257,31 @@ export const createRepairJob = createServerFn({ method: "POST" })
     }
   });
 
+const itemResultPatchSchema = z.object({
+  id: z.string(),
+  diagnosis: z.string().max(5000).nullish(),
+  resolution: z.string().max(5000).nullish(),
+  result: z.string().max(5000).nullish(),
+});
+
 const jobPatchSchema = z.object({
+  customerName: z.string().max(200).nullish(),
+  phone: z.string().max(40).nullish(),
+  contactName: z.string().max(200).nullish(),
+  address: z.string().max(1000).nullish(),
+  urgency: z.string().nullish(),
+  machineType: z.string().max(120).nullish(),
+  brand: z.string().max(120).nullish(),
+  model: z.string().max(120).nullish(),
+  serialNo: z.string().max(120).nullish(),
+  symptom: z.string().max(2000).nullish(),
+  details: z.string().max(5000).nullish(),
   diagnosis: z.string().max(5000).nullish(),
   resolution: z.string().max(5000).nullish(),
   result: z.string().max(5000).nullish(),
   note: z.string().max(5000).nullish(),
   appointmentAt: z.string().nullish(),
+  itemResults: z.array(itemResultPatchSchema).nullish(),
 });
 
 export const updateRepairJob = createServerFn({ method: "POST" })
@@ -273,25 +292,85 @@ export const updateRepairJob = createServerFn({ method: "POST" })
       const { profile } = viewer;
       const current = await loadJob(data.id);
       if (!current) return fail("ไม่พบใบงาน");
-      if (profile.role === "FRONT") return fail("ไม่มีสิทธิ์แก้ไขผลการซ่อม");
+
+      const isOnlyCustomerEdit =
+        data.patch.diagnosis === undefined &&
+        data.patch.resolution === undefined &&
+        data.patch.result === undefined &&
+        data.patch.itemResults === undefined;
+
+      if (profile.role === "FRONT" && !isOnlyCustomerEdit)
+        return fail("ไม่มีสิทธิ์แก้ไขผลการซ่อม");
       if (profile.role === "TECH" && current.technicianId !== profile.id)
         return fail("แก้ไขได้เฉพาะงานที่ได้รับมอบหมาย");
+
+      const admin = supabaseAdmin();
       const dbPatch: Row = {};
+
+      if (data.patch.customerName !== undefined && data.patch.customerName !== null)
+        dbPatch.customer_name = data.patch.customerName;
+      if (data.patch.phone !== undefined && data.patch.phone !== null)
+        dbPatch.customer_phone = data.patch.phone;
+      if (data.patch.contactName !== undefined)
+        dbPatch.contact_name = data.patch.contactName || null;
+      if (data.patch.address !== undefined && data.patch.address !== null)
+        dbPatch.customer_address = data.patch.address;
+      if (data.patch.urgency !== undefined && data.patch.urgency !== null)
+        dbPatch.urgency = data.patch.urgency;
+      if (data.patch.machineType !== undefined && data.patch.machineType !== null)
+        dbPatch.appliance_type = data.patch.machineType;
+      if (data.patch.brand !== undefined && data.patch.brand !== null)
+        dbPatch.brand = data.patch.brand;
+      if (data.patch.model !== undefined)
+        dbPatch.model = data.patch.model || "-";
+      if (data.patch.serialNo !== undefined)
+        dbPatch.serial_number = data.patch.serialNo || null;
+      if (data.patch.symptom !== undefined && data.patch.symptom !== null)
+        dbPatch.symptom = data.patch.symptom;
+      if (data.patch.details !== undefined)
+        dbPatch.details = data.patch.details || null;
       if (data.patch.diagnosis !== undefined)
         dbPatch.diagnosis = data.patch.diagnosis;
       if (data.patch.resolution !== undefined)
         dbPatch.resolution = data.patch.resolution;
-      if (data.patch.result !== undefined) dbPatch.result = data.patch.result;
-      if (data.patch.note !== undefined) dbPatch.note = data.patch.note;
+      if (data.patch.result !== undefined)
+        dbPatch.result = data.patch.result;
+      if (data.patch.note !== undefined)
+        dbPatch.note = data.patch.note;
       if (data.patch.appointmentAt !== undefined)
         dbPatch.appointment_at = data.patch.appointmentAt;
-      const { error } = await supabaseAdmin()
-        .from("repair_jobs")
-        .update(dbPatch)
-        .eq("id", data.id);
-      return error
-        ? fail(error.message || dbError)
-        : { ok: true, value: undefined };
+
+      // บันทึกผลการตรวจสอบ / วิธีแก้ไข / ผลการซ่อม แยกตามแต่ละเครื่องใน repair_job_items
+      if (Array.isArray(data.patch.itemResults) && data.patch.itemResults.length > 0) {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        for (const itemRes of data.patch.itemResults) {
+          if (uuidRegex.test(itemRes.id)) {
+            const { error: itemErr } = await admin
+              .from("repair_job_items")
+              .update({
+                diagnosis: itemRes.diagnosis ?? null,
+                resolution: itemRes.resolution ?? null,
+                result: itemRes.result ?? null,
+              })
+              .eq("id", itemRes.id)
+              .eq("job_id", data.id);
+            if (itemErr) {
+              console.error("[updateRepairJob] item update error:", itemErr);
+              return fail(itemErr.message || dbError);
+            }
+          }
+        }
+      }
+
+      if (Object.keys(dbPatch).length > 0) {
+        const { error } = await admin
+          .from("repair_jobs")
+          .update(dbPatch)
+          .eq("id", data.id);
+        if (error) return fail(error.message || dbError);
+      }
+
+      return { ok: true, value: undefined };
     } catch (error) {
       console.error("[updateRepairJob] catch:", error);
       return fail(error instanceof Error ? error.message : dbError);
