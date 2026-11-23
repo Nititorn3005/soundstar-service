@@ -166,6 +166,39 @@ export function toJob(r: Row, parts: JobPart[]): RepairJob {
     })
     .sort((a, b) => a.at.localeCompare(b.at))
 
+  const baseBm = splitBrandModel(r)
+
+  // แปลงรายการเครื่องซ่อมทั้งหมด (รองรับทั้ง 1 เครื่องและหลายเครื่อง)
+  const rawItems = Array.isArray(r.repair_job_items) ? (r.repair_job_items as Row[]) : []
+  const items =
+    rawItems.length > 0
+      ? rawItems.map((item) => ({
+          id: String(item.id ?? crypto.randomUUID()),
+          applianceType: String(item.appliance_type ?? r.appliance_type ?? ''),
+          machineType: String(item.appliance_type ?? r.appliance_type ?? ''),
+          brand: String(item.brand ?? ''),
+          model: String(item.model ?? ''),
+          serialNumber: str(item.serial_number),
+          serialNo: str(item.serial_number),
+          purchaseDate: str(item.purchase_date),
+          symptom: String(item.symptom ?? ''),
+          details: str(item.details),
+        }))
+      : [
+          {
+            id: `${r.id}-item-1`,
+            applianceType: r.appliance_type ?? '',
+            machineType: r.appliance_type ?? '',
+            brand: baseBm.brand,
+            model: baseBm.model,
+            serialNumber: str(r.serial_number),
+            serialNo: str(r.serial_number),
+            purchaseDate: str(r.purchase_date),
+            symptom: r.symptom ?? '',
+            details: str(r.details),
+          },
+        ]
+
   return {
     id: r.id,
     jobNo: r.job_no,
@@ -175,10 +208,11 @@ export function toJob(r: Row, parts: JobPart[]): RepairJob {
     contactName: str(r.contact_name) || undefined,
     address: r.customer_address ?? '',
     machineType: r.appliance_type ?? '',
-    ...splitBrandModel(r),
+    ...baseBm,
     serialNo: str(r.serial_number) || undefined,
     symptom: r.symptom,
     details: str(r.details) || undefined,
+    items,
     receivedBy: r.created_by,
     technicianId: str(r.technician_id),
     appointmentAt: str(r.appointment_at),
@@ -191,5 +225,5 @@ export function toJob(r: Row, parts: JobPart[]): RepairJob {
     photos: Array.isArray(r.repair_job_photos) ? r.repair_job_photos.length : 0,
     history,
     parts,
-  }
+  } as RepairJob
 }
