@@ -13,9 +13,11 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Moon,
   Package,
   PlusCircle,
   ShieldAlert,
+  Sun,
   Users,
   WashingMachine,
   type LucideIcon,
@@ -187,7 +189,38 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
-function UserChip({ onChangePassword }: { onChangePassword: () => void }) {
+function useThemeMode() {
+  const [dark, setDark] = React.useState(false)
+
+  React.useEffect(() => {
+    const saved = localStorage.getItem('soundstar-theme')
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    const isDark = saved ? saved === 'dark' : prefersDark
+    setDark(isDark)
+    document.documentElement.classList.toggle('dark', isDark)
+  }, [])
+
+  const toggle = React.useCallback(() => {
+    setDark((prev) => {
+      const next = !prev
+      document.documentElement.classList.toggle('dark', next)
+      localStorage.setItem('soundstar-theme', next ? 'dark' : 'light')
+      return next
+    })
+  }, [])
+
+  return { dark, toggle }
+}
+
+function UserChip({
+  onChangePassword,
+  dark,
+  onToggleTheme,
+}: {
+  onChangePassword: () => void
+  dark: boolean
+  onToggleTheme: () => void
+}) {
   const { currentUser } = useAppStore()
   if (!currentUser) return null
   return (
@@ -198,13 +231,31 @@ function UserChip({ onChangePassword }: { onChangePassword: () => void }) {
       <p className="font-ticket text-xs text-sidebar-foreground/70">
         @{currentUser.username} · {ROLE_LABEL[currentUser.role]}
       </p>
-      <button
-        type="button"
-        onClick={onChangePassword}
-        className="mt-2 inline-flex items-center gap-1.5 text-xs text-sidebar-primary hover:underline"
-      >
-        <KeyRound className="size-3" aria-hidden /> เปลี่ยนรหัสผ่าน
-      </button>
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-sidebar-border/60 pt-2">
+        <button
+          type="button"
+          onClick={onChangePassword}
+          className="inline-flex items-center gap-1.5 text-xs text-sidebar-primary hover:underline"
+        >
+          <KeyRound className="size-3" aria-hidden /> เปลี่ยนรหัสผ่าน
+        </button>
+        <button
+          type="button"
+          onClick={onToggleTheme}
+          aria-label={dark ? 'สลับเป็นโหมดสว่าง' : 'สลับเป็นโหมดมืด'}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-sidebar-border bg-sidebar-accent px-2.5 py-1 text-xs font-medium text-sidebar-accent-foreground transition-colors hover:bg-sidebar-primary hover:text-sidebar-primary-foreground"
+        >
+          {dark ? (
+            <>
+              <Sun className="size-3.5 text-amber-300" aria-hidden /> โหมดสว่าง
+            </>
+          ) : (
+            <>
+              <Moon className="size-3.5 text-sky-300" aria-hidden /> โหมดมืด
+            </>
+          )}
+        </button>
+      </div>
     </div>
   )
 }
@@ -213,26 +264,42 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = React.useState(false)
   const [pwOpen, setPwOpen] = React.useState(false)
   const { currentUser } = useAppStore()
+  const { dark, toggle } = useThemeMode()
 
   return (
     <div className="min-h-screen bg-background lg:grid lg:grid-cols-[17rem_1fr]">
       <aside className="no-print drum-rings sticky top-0 hidden h-screen flex-col gap-6 overflow-y-auto bg-sidebar p-4 text-sidebar-foreground lg:flex">
         <Brand className="px-1 pt-2 text-sidebar-accent-foreground" />
         <NavList />
-        <UserChip onChangePassword={() => setPwOpen(true)} />
+        <UserChip
+          onChangePassword={() => setPwOpen(true)}
+          dark={dark}
+          onToggleTheme={toggle}
+        />
       </aside>
 
       <header className="no-print sticky top-0 z-30 flex items-center justify-between bg-sidebar px-4 py-3 text-sidebar-accent-foreground lg:hidden">
         <Brand />
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          aria-label="เปิดเมนู"
-          className="text-sidebar-accent-foreground hover:bg-sidebar-accent"
-          onClick={() => setOpen(true)}
-        >
-          <Menu />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            aria-label={dark ? 'สลับเป็นโหมดสว่าง' : 'สลับเป็นโหมดมืด'}
+            className="text-sidebar-accent-foreground hover:bg-sidebar-accent"
+            onClick={toggle}
+          >
+            {dark ? <Sun className="size-5 text-amber-300" /> : <Moon className="size-5 text-sky-300" />}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            aria-label="เปิดเมนู"
+            className="text-sidebar-accent-foreground hover:bg-sidebar-accent"
+            onClick={() => setOpen(true)}
+          >
+            <Menu />
+          </Button>
+        </div>
       </header>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent
@@ -251,6 +318,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               setOpen(false)
               setPwOpen(true)
             }}
+            dark={dark}
+            onToggleTheme={toggle}
           />
         </SheetContent>
       </Sheet>
@@ -401,28 +470,32 @@ export function PageHeader({
 
 const STATUS_BADGE_STYLE: Record<string, { badge: string; dot: string }> = {
   UNASSIGNED: {
-    badge: 'bg-slate-100 text-slate-700 border-slate-300',
-    dot: 'bg-slate-500',
+    badge: 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800/80 dark:text-slate-200 dark:border-slate-700',
+    dot: 'bg-slate-500 dark:bg-slate-400',
+  },
+  WAITING_ASSIGN: {
+    badge: 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800/80 dark:text-slate-200 dark:border-slate-700',
+    dot: 'bg-slate-500 dark:bg-slate-400',
   },
   ASSIGNED: {
-    badge: 'bg-blue-50 text-blue-700 border-blue-300',
-    dot: 'bg-blue-600',
+    badge: 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/70 dark:text-blue-200 dark:border-blue-800',
+    dot: 'bg-blue-600 dark:bg-blue-400',
   },
   IN_PROGRESS: {
-    badge: 'bg-sky-50 text-sky-700 border-sky-300',
-    dot: 'bg-sky-500',
+    badge: 'bg-sky-50 text-sky-700 border-sky-300 dark:bg-sky-950/70 dark:text-sky-200 dark:border-sky-800',
+    dot: 'bg-sky-500 dark:bg-sky-400',
   },
   WAITING_PARTS: {
-    badge: 'bg-amber-50 text-amber-800 border-amber-300',
-    dot: 'bg-amber-500',
+    badge: 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/70 dark:text-amber-200 dark:border-amber-800',
+    dot: 'bg-amber-500 dark:bg-amber-400',
   },
   COMPLETED: {
-    badge: 'bg-emerald-50 text-emerald-700 border-emerald-300',
-    dot: 'bg-emerald-600',
+    badge: 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-800',
+    dot: 'bg-emerald-600 dark:bg-emerald-400',
   },
   CANCELLED: {
-    badge: 'bg-rose-50 text-rose-700 border-rose-300',
-    dot: 'bg-rose-600',
+    badge: 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/70 dark:text-rose-200 dark:border-rose-800',
+    dot: 'bg-rose-600 dark:bg-rose-400',
   },
 }
 
