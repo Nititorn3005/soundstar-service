@@ -112,9 +112,14 @@ export function Brand({ className }: { className?: string }) {
   )
 }
 
-function NavList({ onNavigate }: { onNavigate?: () => void }) {
-  const { currentUser, jobs, signOut } = useAppStore()
-  const navigate = useNavigate()
+function NavList({
+  onNavigate,
+  onRequestLogout,
+}: {
+  onNavigate?: () => void
+  onRequestLogout: () => void
+}) {
+  const { currentUser, jobs } = useAppStore()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const role = currentUser?.role ?? 'FRONT'
   const latestJob =
@@ -171,11 +176,9 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
       })}
       <button
         type="button"
-        onClick={async () => {
-          await signOut()
+        onClick={() => {
           onNavigate?.()
-          toast.success('ออกจากระบบแล้ว')
-          navigate({ to: '/' })
+          onRequestLogout()
         }}
         className="mt-2 flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground/80 transition-colors hover:bg-destructive/20 hover:text-sidebar-accent-foreground"
       >
@@ -212,14 +215,41 @@ function useThemeMode() {
   return { dark, toggle }
 }
 
+function useFontScale() {
+  const [largeFont, setLargeFont] = React.useState(false)
+
+  React.useEffect(() => {
+    const saved = localStorage.getItem('soundstar-font-scale')
+    const isLarge = saved === 'large'
+    setLargeFont(isLarge)
+    document.documentElement.style.fontSize = isLarge ? '112.5%' : ''
+  }, [])
+
+  const toggleFont = React.useCallback(() => {
+    setLargeFont((prev) => {
+      const next = !prev
+      document.documentElement.style.fontSize = next ? '112.5%' : ''
+      localStorage.setItem('soundstar-font-scale', next ? 'large' : 'normal')
+      toast.success(next ? 'ปรับขนาดตัวอักษรเป็น “ใหญ่พิเศษ” แล้ว' : 'ปรับขนาดตัวอักษรเป็น “ปกติ” แล้ว')
+      return next
+    })
+  }, [])
+
+  return { largeFont, toggleFont }
+}
+
 function UserChip({
   onChangePassword,
   dark,
   onToggleTheme,
+  largeFont,
+  onToggleFont,
 }: {
   onChangePassword: () => void
   dark: boolean
   onToggleTheme: () => void
+  largeFont: boolean
+  onToggleFont: () => void
 }) {
   const { currentUser } = useAppStore()
   if (!currentUser) return null
@@ -231,19 +261,13 @@ function UserChip({
       <p className="font-ticket text-xs text-sidebar-foreground/70">
         @{currentUser.username} · {ROLE_LABEL[currentUser.role]}
       </p>
-      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-sidebar-border/60 pt-2">
-        <button
-          type="button"
-          onClick={onChangePassword}
-          className="inline-flex items-center gap-1.5 text-xs text-sidebar-primary hover:underline"
-        >
-          <KeyRound className="size-3" aria-hidden /> เปลี่ยนรหัสผ่าน
-        </button>
+
+      <div className="mt-2.5 flex items-center gap-1.5 border-t border-sidebar-border/60 pt-2.5">
         <button
           type="button"
           onClick={onToggleTheme}
           aria-label={dark ? 'สลับเป็นโหมดสว่าง' : 'สลับเป็นโหมดมืด'}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-sidebar-border bg-sidebar-accent px-2.5 py-1 text-xs font-medium text-sidebar-accent-foreground transition-colors hover:bg-sidebar-primary hover:text-sidebar-primary-foreground"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-sidebar-border bg-sidebar-accent px-2 py-1.5 text-xs font-medium text-sidebar-accent-foreground transition-colors hover:bg-sidebar-primary hover:text-sidebar-primary-foreground"
         >
           {dark ? (
             <>
@@ -255,7 +279,30 @@ function UserChip({
             </>
           )}
         </button>
+
+        <button
+          type="button"
+          onClick={onToggleFont}
+          aria-label={largeFont ? 'ปรับตัวอักษรขนาดปกติ' : 'ปรับตัวอักษรขนาดใหญ่'}
+          title="สลับขนาดตัวอักษร ปกติ / ใหญ่พิเศษ"
+          className={cn(
+            'inline-flex items-center justify-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors',
+            largeFont
+              ? 'border-sidebar-primary bg-sidebar-primary text-sidebar-primary-foreground'
+              : 'border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground',
+          )}
+        >
+          {largeFont ? 'ก+ ใหญ่' : 'ก ปกติ'}
+        </button>
       </div>
+
+      <button
+        type="button"
+        onClick={onChangePassword}
+        className="mt-2 inline-flex items-center gap-1.5 text-xs text-sidebar-primary hover:underline"
+      >
+        <KeyRound className="size-3" aria-hidden /> เปลี่ยนรหัสผ่าน
+      </button>
     </div>
   )
 }
@@ -263,24 +310,63 @@ function UserChip({
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = React.useState(false)
   const [pwOpen, setPwOpen] = React.useState(false)
-  const { currentUser } = useAppStore()
+  const [logoutOpen, setLogoutOpen] = React.useState(false)
+  const [loggingOut, setLoggingOut] = React.useState(false)
+  const { currentUser, signOut } = useAppStore()
+  const navigate = useNavigate()
   const { dark, toggle } = useThemeMode()
+  const { largeFont, toggleFont } = useFontScale()
+
+  const handleConfirmLogout = async () => {
+    setLoggingOut(true)
+    try {
+      await signOut()
+      setLogoutOpen(false)
+      toast.success('ออกจากระบบเรียบร้อยแล้ว')
+      navigate({ to: '/' })
+    } finally {
+      setLoggingOut(false)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-background lg:grid lg:grid-cols-[17rem_1fr]">
+      <style>{`
+        @media print {
+          html {
+            font-size: 16px !important;
+          }
+        }
+      `}</style>
+
       <aside className="no-print drum-rings sticky top-0 hidden h-screen flex-col gap-6 overflow-y-auto bg-sidebar p-4 text-sidebar-foreground lg:flex">
         <Brand className="px-1 pt-2 text-sidebar-accent-foreground" />
-        <NavList />
+        <NavList onRequestLogout={() => setLogoutOpen(true)} />
         <UserChip
           onChangePassword={() => setPwOpen(true)}
           dark={dark}
           onToggleTheme={toggle}
+          largeFont={largeFont}
+          onToggleFont={toggleFont}
         />
       </aside>
 
       <header className="no-print sticky top-0 z-30 flex items-center justify-between bg-sidebar px-4 py-3 text-sidebar-accent-foreground lg:hidden">
         <Brand />
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={toggleFont}
+            aria-label={largeFont ? 'ปรับตัวอักษรขนาดปกติ' : 'ปรับตัวอักษรขนาดใหญ่'}
+            className={cn(
+              'mr-0.5 rounded-lg border px-2 py-1 text-xs font-bold transition-colors',
+              largeFont
+                ? 'border-sidebar-primary bg-sidebar-primary text-sidebar-primary-foreground'
+                : 'border-sidebar-border bg-sidebar-accent/70 text-sidebar-accent-foreground',
+            )}
+          >
+            {largeFont ? 'ก+' : 'ก'}
+          </button>
           <Button
             variant="ghost"
             size="icon-lg"
@@ -312,7 +398,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </SheetTitle>
             <SheetDescription className="sr-only">เมนูหลักของระบบ</SheetDescription>
           </SheetHeader>
-          <NavList onNavigate={() => setOpen(false)} />
+          <NavList
+            onNavigate={() => setOpen(false)}
+            onRequestLogout={() => setLogoutOpen(true)}
+          />
           <UserChip
             onChangePassword={() => {
               setOpen(false)
@@ -320,6 +409,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             }}
             dark={dark}
             onToggleTheme={toggle}
+            largeFont={largeFont}
+            onToggleFont={toggleFont}
           />
         </SheetContent>
       </Sheet>
@@ -330,7 +421,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </main>
         <CompanyFooter />
       </div>
+
       {currentUser && <ChangePasswordDialog open={pwOpen} onOpenChange={setPwOpen} />}
+
+      <Dialog open={logoutOpen} onOpenChange={setLogoutOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <LogOut className="size-5 text-destructive" aria-hidden /> ยืนยันการออกจากระบบ
+            </DialogTitle>
+            <DialogDescription>
+              คุณต้องการออกจากระบบบัญชี{' '}
+              <span className="font-semibold text-foreground">
+                {currentUser?.fullName || currentUser?.username}
+              </span>{' '}
+              ใช่หรือไม่?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loggingOut}
+              onClick={() => setLogoutOpen(false)}
+            >
+              ยกเลิก
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={loggingOut}
+              onClick={handleConfirmLogout}
+            >
+              {loggingOut ? 'กำลังออกจากระบบ...' : 'ยืนยันออกจากระบบ'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
